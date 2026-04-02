@@ -6,6 +6,7 @@
     let uploadArea: HTMLElement;
     let sequenceNumber = 101;
     let driveNumber = 2;
+    let cueStartNumber = 1;
     let prefix = "1";
     let exportMode: "cues-and-timecode" | "cues-only" = "cues-and-timecode";
     let isDragOver = false;
@@ -27,7 +28,7 @@
     }[];
 
     type FullData = {
-        uniqueSequences: ParsedData;
+        uniqueCues: ParsedData;
         repeatedSequences: RepeatedSequenceData;
         filename: string;
     };
@@ -102,7 +103,7 @@
                 }))
                 .reverse();
 
-            const uniqueSequences = data.filter((item) => !item.color);
+            const uniqueCues = data.filter((item) => !item.color);
             const repeatedSequenceList = data.filter((item) => item.color);
 
             let sqCounter = sequenceNumber + 1;
@@ -124,11 +125,11 @@
             processingStatus = "Generating XML files...";
             await new Promise((resolve) => setTimeout(resolve, 100));
 
-            const xmlContent = generateMacroXML({ repeatedSequences, uniqueSequences, filename });
+            const xmlContent = generateMacroXML({ repeatedSequences, uniqueCues, filename });
             downloadContentWithName(xmlContent, `${filename}_macro.xml`);
 
             if (exportMode === "cues-and-timecode") {
-                const timecodeContent = generateTimecodeXML({ repeatedSequences, uniqueSequences, filename });
+                const timecodeContent = generateTimecodeXML({ repeatedSequences, uniqueCues, filename });
                 downloadContentWithName(timecodeContent, `${filename}_timecode.xml`);
             }
 
@@ -205,7 +206,7 @@
             .join(" ");
     }
 
-    function generateMacroXML({ repeatedSequences, uniqueSequences, filename }: FullData): string {
+    function generateMacroXML({ repeatedSequences, uniqueCues, filename }: FullData): string {
         const obj = {
             ...XML_HEADER,
             GMA3: {
@@ -216,11 +217,11 @@
                     MacroLine: [
                         // unique sequences
                         {
-                            "@_Command": `Store Sequence ${sequenceNumber} Cue 1 thru ${uniqueSequences.length}`,
+                            "@_Command": `Store Sequence ${sequenceNumber} Cue ${cueStartNumber} thru ${uniqueCues.length + cueStartNumber - 1}`,
                             "@_Wait": "0.10",
                         },
-                        ...uniqueSequences.map((item, index) => ({
-                            "@_Command": `Label Sequence ${sequenceNumber} Cue ${index + 1} "${item.name}"`,
+                        ...uniqueCues.map((item, index) => ({
+                            "@_Command": `Label Sequence ${sequenceNumber} Cue ${index + cueStartNumber} "${item.name}"`,
                             "@_Wait": "0.10",
                         })),
                         /// repeated sequences
@@ -261,20 +262,21 @@
         return builder.build(obj);
     }
 
-    function generateTimecodeXML({ uniqueSequences, repeatedSequences, filename }: FullData): string {
+    function generateTimecodeXML({ uniqueCues, repeatedSequences, filename }: FullData): string {
         const obj = {
             ...XML_HEADER,
             GMA3: {
                 "@_DataVersion": "1.4.0.2",
+                // unique sequences
                 Timecode: {
                     "@_Name": filename,
                     "@_Guid": "00 00 00 00 3F 76 B7 04 32 0B 00 00 68 A1 4F AA",
                     "@_Cursor": "00.00",
-                    "@_Duration": uniqueSequences.length > 0 ? (parseFloat(uniqueSequences[uniqueSequences.length - 1].start) + 1).toFixed(3) : "0.00",
+                    "@_Duration": uniqueCues.length > 0 ? (parseFloat(uniqueCues[uniqueCues.length - 1].start) + 1).toFixed(3) : "0.00",
                     "@_LoopCount": "0",
                     "@_TCSlot": "-1",
                     "@_SwitchOff": "Keep Playbacks",
-                    "@_Goto": "as Go",
+                    // "@_Goto": "as Go",
                     "@_Timedisplayformat": "<10d11h23m45>",
                     "@_FrameReadout": "<Seconds>",
                     TrackGroup: [
@@ -295,8 +297,8 @@
                                     "@_Play": "",
                                     "@_Rec": "",
                                     CmdSubTrack: {
-                                        CmdEvent: uniqueSequences.map((item, index) => ({
-                                            "@_Name": "Go+",
+                                        CmdEvent: uniqueCues.map((item, index) => ({
+                                            "@_Name": "Goto",
                                             "@_Time": item.start,
                                             RealtimeCmd: {
                                                 "@_Type": "Key",
@@ -318,7 +320,7 @@
                                                           "@_Object": `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}`,
                                                       }
                                                     : {}),
-                                                "@_ExecToken": "Go+",
+                                                "@_ExecToken": "Goto",
                                                 "@_ValCueDestination": `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}.${item.name}`,
                                             },
                                         })),
@@ -326,6 +328,7 @@
                                 },
                             },
                         },
+                        // repeated sequences
                         {
                             "@_Play": "",
                             "@_Rec": "",
@@ -344,7 +347,7 @@
                                     "@_Rec": "",
                                     CmdSubTrack: {
                                         CmdEvent: item.timestamps.map((timestamp, index) => ({
-                                            "@_Name": "Go+",
+                                            "@_Name": "Goto",
                                             "@_Time": timestamp,
                                             RealtimeCmd: {
                                                 "@_Type": "Key",
@@ -366,7 +369,7 @@
                                                           "@_Object": `ShowData.DataPools.Default.Sequences.${item.name}`,
                                                       }
                                                     : {}),
-                                                "@_ExecToken": "Go+",
+                                                "@_ExecToken": "Goto",
                                                 "@_ValCueDestination": `ShowData.DataPools.Default.Sequences.${item.name}.Cue 1`,
                                             },
                                         })),
@@ -466,6 +469,19 @@
             </div>
         </div>
 
+        <details class="advanced-mode-section section-card">
+            <summary class="section-summary">
+                <span class="label-text">Advanced</span>
+                <span class="label-hint">Additional options</span>
+            </summary>
+            <div>
+                <label for="drive-number" class="label">
+                    <span class="label-text">Cue Start Number</span>
+                    <span class="label-hint">Starting number for cues (1-9999)</span>
+                </label>
+                <input id="drive-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
+            </div>
+        </details>
         <div class="export-mode-section">
             <div class="label">
                 <span class="label-text">Export Mode</span>
@@ -529,7 +545,7 @@
 
     <footer class="footer">
         <p>Made with ❤️ and Svelte - View <a target="_blank" href="https://github.com/hrueger/reaper2ma">Source on GitHub</a></p>
-        <p>&copy; 2025 Hannes Rüger</p>
+        <p>&copy; 2025 - 2026 Hannes Rüger</p>
     </footer>
 </main>
 
@@ -796,8 +812,58 @@
         flex-shrink: 0;
     }
 
-    .export-mode-section {
+    .export-mode-section,
+    .advanced-mode-section {
         margin-top: 1.5rem;
+    }
+
+    .section-card {
+        border: 1px solid var(--border-light);
+        border-radius: 12px;
+        padding: 1rem;
+        background: color-mix(in srgb, var(--upload-bg) 82%, transparent);
+        transition:
+            border-color 0.2s ease,
+            background 0.2s ease,
+            box-shadow 0.2s ease;
+    }
+
+    .section-card:hover {
+        border-color: var(--border-hover);
+    }
+
+    .section-summary {
+        list-style: none;
+        cursor: pointer;
+        position: relative;
+        padding-right: 2rem;
+    }
+
+    .section-summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .section-summary::after {
+        content: "";
+        position: absolute;
+        right: 0.5rem;
+        top: 50%;
+        width: 0.55rem;
+        height: 0.55rem;
+        border-right: 2px solid var(--text-secondary);
+        border-bottom: 2px solid var(--text-secondary);
+        transform: translateY(-65%) rotate(45deg);
+        transition: transform 0.2s ease;
+    }
+
+    .advanced-mode-section[open] .section-summary::after {
+        transform: translateY(-25%) rotate(225deg);
+    }
+
+    .advanced-mode-section > div {
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--border-light);
     }
 
     .radio-group {
@@ -946,20 +1012,6 @@
         justify-content: center;
         font-weight: 600;
         flex-shrink: 0;
-    }
-
-    .note {
-        background: var(--note-bg);
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid var(--note-border);
-        margin: 0;
-        font-size: 0.9rem;
-        line-height: 1.5;
-        color: var(--text-primary);
-        transition:
-            background 0.3s ease,
-            border 0.3s ease;
     }
 
     .footer {

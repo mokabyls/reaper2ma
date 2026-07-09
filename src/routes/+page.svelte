@@ -1,6 +1,5 @@
 <script lang="ts">
-    import * as csv from "@vanillaes/csv";
-    import { XMLBuilder } from "fast-xml-parser";
+    import { convertReaperCsvToArtifacts, createConversionOutputFiles, downloadTextFile, type ConversionSettings, type ExportMode } from "$lib/reaper2ma/index.js";
 
     let fileInput: HTMLInputElement;
     let uploadArea: HTMLElement;
@@ -8,148 +7,86 @@
     let driveNumber = 2;
     let cueStartNumber = 1;
     let prefix = "1";
-    let exportMode: "cues-and-timecode" | "cues-only" = "cues-and-timecode";
+    let exportMode: ExportMode = "cues-and-timecode";
     let isDragOver = false;
     let isProcessing = false;
     let processingStatus = "";
     let processingCompleted = false;
+    let selectedFileName = "";
 
-    type ParsedData = {
-        name: string;
-        start: string;
-        color: string;
-    }[];
+    const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-    type RepeatedSequenceData = {
-        color: string;
-        name: string;
-        timestamps: string[];
-        sequenceNumber: number;
-    }[];
+    function getConversionSettings(): ConversionSettings {
+        return {
+            sequenceNumber,
+            driveNumber,
+            cueStartNumber,
+            prefix,
+            exportMode,
+        };
+    }
 
-    type FullData = {
-        uniqueCues: ParsedData;
-        repeatedSequences: RepeatedSequenceData;
-        filename: string;
-    };
-
-    function handleFileChange(event: Event) {
-        const input = event.target as HTMLInputElement;
-        if (input.files && input.files.length > 0) {
-            const file = input.files[0];
+    function readFileAsText(file: File): Promise<string> {
+        return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = (e) => {
-                const text = e.target?.result;
-                const filename = file.name
-                    .replace(".csv", "")
-                    .toLowerCase()
-                    .replace(/[^a-z]/g, "");
-                processCsv(text as string, filename);
+
+            reader.onload = (event) => {
+                resolve(String(event.target?.result ?? ""));
+            };
+            reader.onerror = () => {
+                reject(reader.error ?? new Error("Unable to read the selected file."));
             };
             reader.readAsText(file);
-        }
+        });
     }
 
-    function downloadContentWithName(content: string, filename: string) {
-        const blob = new Blob([content], { type: "application/xml" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-
-    function safeName(name: string): string {
-        return name.replace(/[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g, "");
-    }
-
-    async function processCsv(dataString: string, filename: string) {
+    function setProcessingState(message: string) {
         isProcessing = true;
-        processingStatus = "Parsing CSV data...";
+        processingStatus = message;
+        processingCompleted = false;
+    }
+
+    async function processFile(file: File) {
+        selectedFileName = file.name;
+        setProcessingState("Parsing CSV data...");
 
         try {
-            await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay for UI
-
-            const parsedLines = csv.parse(dataString) as string[][];
-            const header = parsedLines[0];
-            const dataByHeader = parsedLines.slice(1).map((row) => {
-                const obj: Record<string, string> = {};
-                row.forEach((value, index) => {
-                    obj[header[index]] = value;
-                });
-                return obj;
-            }) as { "#": string; Name: string; Start: string; Color: string }[];
-
-            const seenNameCount: Record<string, number> = {};
-
-            const data = dataByHeader
-                .map((item) => {
-                    let name = safeName(item.Name);
-                    seenNameCount[name] = (seenNameCount[name] || 0) + 1;
-                    return {
-                        name: name,
-                        start: item.Start,
-                        color: item.Color,
-                    };
-                })
-                .reverse()
-                .map((item) => ({
-                    ...item,
-                    // add 1 for the first ones
-                    name: seenNameCount[item.name] > 1 ? `${item.name} ${seenNameCount[item.name]--}` : item.name,
-                }))
-                .reverse();
-
-            const uniqueCues = data.filter((item) => !item.color);
-            const repeatedSequenceList = data.filter((item) => item.color);
-
-            let sqCounter = sequenceNumber + 1;
-            const repeatedSequences: RepeatedSequenceData = repeatedSequenceList.reduce((acc, curr, index) => {
-                const existing = acc.find((item) => item.color === curr.color);
-                if (existing) {
-                    existing.timestamps.push(curr.start);
-                } else {
-                    acc.push({
-                        color: curr.color,
-                        name: `${prefix} - ${curr.name}`,
-                        timestamps: [curr.start],
-                        sequenceNumber: sqCounter++,
-                    });
-                }
-                return acc;
-            }, [] as RepeatedSequenceData);
+            await delay(100);
+            const csvText = await readFileAsText(file);
+            const artifacts = convertReaperCsvToArtifacts(csvText, file.name, getConversionSettings());
 
             processingStatus = "Generating XML files...";
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            await delay(100);
 
-            const xmlContent = generateMacroXML({ repeatedSequences, uniqueCues, filename });
-            downloadContentWithName(xmlContent, `${filename}_macro.xml`);
-
-            if (exportMode === "cues-and-timecode") {
-                const timecodeContent = generateTimecodeXML({ repeatedSequences, uniqueCues, filename });
-                downloadContentWithName(timecodeContent, `${filename}_timecode.xml`);
+            for (const outputFile of createConversionOutputFiles(artifacts)) {
+                downloadTextFile(outputFile.content, outputFile.name);
             }
 
             processingStatus = "✅ Files generated successfully!";
+            processingCompleted = true;
             setTimeout(() => {
                 isProcessing = false;
                 processingStatus = "";
-                processingCompleted = true;
             }, 500);
         } catch (error) {
             processingStatus = "❌ Error processing file";
+            console.error("Error processing CSV:", error);
             setTimeout(() => {
                 isProcessing = false;
                 processingStatus = "";
             }, 3000);
-            console.error("Error processing CSV:", error);
         }
     }
 
-    // Drag and drop handlers
+    function handleFileChange(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+
+        if (file) {
+            void processFile(file);
+        }
+    }
+
     function handleDragOver(event: DragEvent) {
         event.preventDefault();
         isDragOver = true;
@@ -162,227 +99,37 @@
         }
     }
 
+    function handleUploadKeydown(event: KeyboardEvent) {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            fileInput?.click();
+        }
+    }
+
     function handleDrop(event: DragEvent) {
         event.preventDefault();
         isDragOver = false;
 
-        const files = event.dataTransfer?.files;
-        if (files && files.length > 0) {
-            const file = files[0];
-            if (file.type === "text/csv" || file.name.endsWith(".csv")) {
-                // Simulate file input selection
-                fileInput.files = files;
-                handleFileChange({ target: fileInput } as any);
-            } else {
-                alert("Please select a CSV file");
-            }
+        const file = event.dataTransfer?.files?.[0];
+
+        if (!file) {
+            return;
         }
+
+        if (file.type === "text/csv" || file.name.endsWith(".csv")) {
+            void processFile(file);
+            return;
+        }
+
+        processingStatus = "Please select a CSV file.";
     }
 
     function clearFile() {
         fileInput.value = "";
+        selectedFileName = "";
         processingCompleted = false;
         processingStatus = "";
         isProcessing = false;
-    }
-
-    const builder = new XMLBuilder({
-        attributeNamePrefix: "@_",
-        ignoreAttributes: false,
-        format: true,
-        suppressEmptyNode: true,
-        indentBy: "    ",
-    });
-    const XML_HEADER = {
-        "?xml": {
-            "@_version": "1.0",
-            "@_encoding": "UTF-8",
-        },
-    };
-
-    function generateGUID() {
-        return Array.from({ length: 16 }, () => Math.floor(Math.random() * 256))
-            .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-            .join(" ");
-    }
-
-    function generateMacroXML({ repeatedSequences, uniqueCues, filename }: FullData): string {
-        const obj = {
-            ...XML_HEADER,
-            GMA3: {
-                "@_DataVersion": "1.4.0.2",
-                Macro: {
-                    "@_Name": `Macro ${filename}`,
-                    "@_Guid": "00 00 00 00 A8 F8 B9 20 78 06 00 00 A5 46 09 AA",
-                    MacroLine: [
-                        // unique sequences
-                        {
-                            "@_Command": `Store Sequence ${sequenceNumber} Cue ${cueStartNumber} thru ${uniqueCues.length + cueStartNumber - 1}`,
-                            "@_Wait": "0.10",
-                        },
-                        ...uniqueCues.map((item, index) => ({
-                            "@_Command": `Label Sequence ${sequenceNumber} Cue ${index + cueStartNumber} "${item.name}"`,
-                            "@_Wait": "0.10",
-                        })),
-                        /// repeated sequences
-                        ...repeatedSequences.flatMap((u, index) => {
-                            return [
-                                {
-                                    "@_Command": `Store Sequence ${u.sequenceNumber} "${u.name}"`,
-                                    "@_Wait": "0.10",
-                                },
-                                {
-                                    "@_Command": `Store Cue 1 Sequence ${u.sequenceNumber} /Merge`,
-                                    "@_Wait": "0.10",
-                                },
-                                {
-                                    "@_Command": `Set Sequence ${u.sequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`,
-                                    "@_Wait": "0.10",
-                                },
-                            ];
-                        }),
-                        /// Timecode Import (only if exportMode is cues-and-timecode)
-                        ...(exportMode === "cues-and-timecode"
-                            ? [
-                                  {
-                                      "@_Command": `Drive ${driveNumber}`,
-                                      "@_Wait": "0.10",
-                                  },
-                                  {
-                                      "@_Command": `import Timecode "${filename}_timecode"`,
-                                      "@_Wait": "0.10",
-                                  },
-                              ]
-                            : []),
-                    ],
-                },
-            },
-        };
-
-        return builder.build(obj);
-    }
-
-    function generateTimecodeXML({ uniqueCues, repeatedSequences, filename }: FullData): string {
-        const obj = {
-            ...XML_HEADER,
-            GMA3: {
-                "@_DataVersion": "1.4.0.2",
-                // unique sequences
-                Timecode: {
-                    "@_Name": filename,
-                    "@_Guid": "00 00 00 00 3F 76 B7 04 32 0B 00 00 68 A1 4F AA",
-                    "@_Cursor": "00.00",
-                    "@_Duration": uniqueCues.length > 0 ? (parseFloat(uniqueCues[uniqueCues.length - 1].start) + 1).toFixed(3) : "0.00",
-                    "@_LoopCount": "0",
-                    "@_TCSlot": "-1",
-                    "@_SwitchOff": "Keep Playbacks",
-                    // "@_Goto": "as Go",
-                    "@_Timedisplayformat": "<10d11h23m45>",
-                    "@_FrameReadout": "<Seconds>",
-                    TrackGroup: [
-                        {
-                            "@_Play": "",
-                            "@_Rec": "",
-                            MarkerTrack: {
-                                "@_Name": "Marker",
-                                "@_Guid": "00 00 00 00 B1 F5 25 5F 70 04 00 00 28 74 D0 4B",
-                            },
-                            Track: {
-                                "@_Guid": "00 00 00 00 B7 10 04 13 3B 0B 00 00 38 E1 4F AA",
-                                "@_Target": `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}`,
-                                "@_Play": "",
-                                "@_Rec": "",
-                                TimeRange: {
-                                    "@_Guid": "00 00 00 00 21 68 E5 6F 3C 0B 00 00 38 E1 4F AA",
-                                    "@_Play": "",
-                                    "@_Rec": "",
-                                    CmdSubTrack: {
-                                        CmdEvent: uniqueCues.map((item, index) => ({
-                                            "@_Name": "Goto",
-                                            "@_Time": item.start,
-                                            RealtimeCmd: {
-                                                "@_Type": "Key",
-                                                "@_Source": "Original",
-                                                "@_UserProfile": "0",
-                                                "@_Status": "On",
-                                                "@_IsRealtime": "1",
-                                                "@_IsXFade": "0",
-                                                "@_IgnoreFollow": "0",
-                                                "@_IgnoreCommand": "0",
-                                                "@_Assert": "0",
-                                                "@_IgnoreNetwork": "0",
-                                                "@_FromTriggerNode": "0",
-                                                "@_IgnoreExecTime": "0",
-                                                "@_IssuedByTimecode": "0",
-                                                "@_FromLocalHardwareFader": "1",
-                                                ...(index == 0
-                                                    ? {
-                                                          "@_Object": `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}`,
-                                                      }
-                                                    : {}),
-                                                "@_ExecToken": "Goto",
-                                                "@_ValCueDestination": `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}.${item.name}`,
-                                            },
-                                        })),
-                                    },
-                                },
-                            },
-                        },
-                        // repeated sequences
-                        {
-                            "@_Play": "",
-                            "@_Rec": "",
-                            MarkerTrack: {
-                                "@_Name": "Marker",
-                                "@_Guid": "00 00 00 00 B1 F5 25 5F 70 04 00 00 28 74 D0 4C",
-                            },
-                            Track: repeatedSequences.map((item) => ({
-                                "@_Guid": generateGUID(),
-                                "@_Target": `ShowData.DataPools.Default.Sequences.${item.name}`,
-                                "@_Play": "",
-                                "@_Rec": "",
-                                TimeRange: {
-                                    "@_Guid": generateGUID(),
-                                    "@_Play": "",
-                                    "@_Rec": "",
-                                    CmdSubTrack: {
-                                        CmdEvent: item.timestamps.map((timestamp, index) => ({
-                                            "@_Name": "Goto",
-                                            "@_Time": timestamp,
-                                            RealtimeCmd: {
-                                                "@_Type": "Key",
-                                                "@_Source": "Original",
-                                                "@_UserProfile": "0",
-                                                "@_Status": "On",
-                                                "@_IsRealtime": "1",
-                                                "@_IsXFade": "0",
-                                                "@_IgnoreFollow": "0",
-                                                "@_IgnoreCommand": "0",
-                                                "@_Assert": "0",
-                                                "@_IgnoreNetwork": "0",
-                                                "@_FromTriggerNode": "0",
-                                                "@_IgnoreExecTime": "0",
-                                                "@_IssuedByTimecode": "0",
-                                                "@_FromLocalHardwareFader": "1",
-                                                ...(index == 0
-                                                    ? {
-                                                          "@_Object": `ShowData.DataPools.Default.Sequences.${item.name}`,
-                                                      }
-                                                    : {}),
-                                                "@_ExecToken": "Goto",
-                                                "@_ValCueDestination": `ShowData.DataPools.Default.Sequences.${item.name}.Cue 1`,
-                                            },
-                                        })),
-                                    },
-                                },
-                            })),
-                        },
-                    ],
-                },
-            },
-        };
-
-        return builder.build(obj);
     }
 </script>
 
@@ -400,10 +147,10 @@
     <div class="card">
         <div class="upload-section">
             <label for="file-input" class="upload-label">
-                <div bind:this={uploadArea} class="upload-area" class:has-file={fileInput?.files?.length} class:drag-over={isDragOver} class:processing={isProcessing} on:dragover={handleDragOver} on:dragleave={handleDragLeave} on:drop={handleDrop} role="button" tabindex="0" aria-label="Upload CSV file">
+                <div bind:this={uploadArea} class="upload-area" class:has-file={Boolean(selectedFileName)} class:drag-over={isDragOver} class:processing={isProcessing} on:dragover={handleDragOver} on:dragleave={handleDragLeave} on:drop={handleDrop} on:keydown={handleUploadKeydown} role="button" tabindex="0" aria-label="Upload CSV file">
                     {#if isProcessing}
                         <div class="spinner"></div>
-                        <span class="upload-text processing-text">{processingStatus}</span>
+                        <span class="upload-text processing-text" aria-live="polite">{processingStatus}</span>
                     {:else}
                         <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -413,8 +160,8 @@
                             <polyline points="10,9 9,9 8,9"></polyline>
                         </svg>
                         <span class="upload-text">
-                            {#if fileInput?.files?.length}
-                                ✅ {fileInput.files[0].name}
+                            {#if selectedFileName}
+                                ✅ {selectedFileName}
                             {:else if isDragOver}
                                 📁 Drop your CSV file here
                             {:else}
@@ -425,12 +172,16 @@
                     {/if}
                 </div>
             </label>
-            <input id="file-input" type="file" accept=".csv" name={Math.random().toString()} bind:this={fileInput} on:change={handleFileChange} class="file-input" />
+            <input id="file-input" type="file" accept=".csv" bind:this={fileInput} on:change={handleFileChange} class="file-input" />
         </div>
 
-        {#if processingCompleted && fileInput?.files?.length}
+        {#if processingStatus && !isProcessing}
+            <p class="status-message" role="status">{processingStatus}</p>
+        {/if}
+
+        {#if processingCompleted && selectedFileName}
             <div class="new-file-section">
-                <button class="new-file-button" on:click={clearFile}>
+                <button type="button" class="new-file-button" on:click={clearFile}>
                     <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 6h18"></path>
                         <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
@@ -475,11 +226,11 @@
                 <span class="label-hint">Additional options</span>
             </summary>
             <div>
-                <label for="drive-number" class="label">
+                <label for="cue-start-number" class="label">
                     <span class="label-text">Cue Start Number</span>
                     <span class="label-hint">Starting number for cues (1-9999)</span>
                 </label>
-                <input id="drive-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
+                <input id="cue-start-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
             </div>
         </details>
         <div class="export-mode-section">
@@ -672,6 +423,17 @@
 
     .upload-section {
         margin-bottom: 2rem;
+    }
+
+    .status-message {
+        margin: -0.5rem 0 1.5rem;
+        padding: 0.85rem 1rem;
+        border-radius: 12px;
+        background: var(--step-bg);
+        border: 1px solid var(--border-light);
+        color: var(--text-primary);
+        text-align: center;
+        font-size: 0.95rem;
     }
 
     .upload-label {

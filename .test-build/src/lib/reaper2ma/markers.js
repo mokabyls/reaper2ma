@@ -1,4 +1,5 @@
 import * as csv from "@vanillaes/csv";
+import { createAppearanceNameFromReaperColor } from "./colors.js";
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
 const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]\s*$/;
 const CANONICAL_EXECUTION_TOKENS = {
@@ -210,9 +211,10 @@ export function splitMarkerRows(markers) {
         repeatedMarkers: markers.filter((marker) => marker.color),
     };
 }
-export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber) {
+export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber, appearanceStartNumber) {
     const repeatedSequences = [];
     const sequencesByColor = new Map();
+    let nextAppearanceNumber = appearanceStartNumber;
     let nextSequenceNumber = sequenceNumber + 1;
     for (const marker of repeatedMarkers) {
         const existing = sequencesByColor.get(marker.color);
@@ -232,6 +234,8 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber) 
                     execToken: marker.execToken,
                 },
             ],
+            appearanceName: createAppearanceNameFromReaperColor(marker.color),
+            appearanceNumber: nextAppearanceNumber++,
             sequenceNumber: nextSequenceNumber++,
         };
         sequencesByColor.set(marker.color, repeatedSequence);

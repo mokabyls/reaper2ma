@@ -31,6 +31,8 @@ export type RepeatedSequence = {
     color: string;
     displayName: string;
     events: RepeatedSequenceEvent[];
+    appearanceName: string;
+    appearanceNumber: number;
     sequenceNumber: number;
 };
 
@@ -49,6 +51,7 @@ export type BpmSequence = {
 
 export type ConversionSettings = {
     sequenceNumber: number;
+    appearanceStartNumber: number;
     driveNumber: number;
     cueStartNumber: number;
     speedMaster: string;

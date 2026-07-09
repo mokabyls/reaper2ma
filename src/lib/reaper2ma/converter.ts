@@ -7,7 +7,7 @@ export function convertReaperCsvToArtifacts(dataString: string, sourceFileName: 
     const rows = parseReaperMarkerRows(dataString);
     const normalizedMarkers = normalizeMarkerRows(rows);
     const { uniqueCues, repeatedMarkers } = splitMarkerRows(normalizedMarkers);
-    const repeatedSequences = groupRepeatedSequences(repeatedMarkers, settings.prefix, settings.sequenceNumber);
+    const repeatedSequences = groupRepeatedSequences(repeatedMarkers, settings.prefix, settings.sequenceNumber, settings.appearanceStartNumber);
     const bpmMarkers = normalizedMarkers.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, repeatedSequences.length);
     const outputBaseName = normalizeOutputBaseName(sourceFileName);

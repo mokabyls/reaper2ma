@@ -4,6 +4,7 @@
     let fileInput: HTMLInputElement;
     let uploadArea: HTMLElement;
     let sequenceNumber = 101;
+    let appearanceStartNumber = 1;
     let driveNumber = 2;
     let cueStartNumber = 1;
     let speedMaster = "3.4";
@@ -20,6 +21,7 @@
     function getConversionSettings(): ConversionSettings {
         return {
             sequenceNumber,
+            appearanceStartNumber,
             driveNumber,
             cueStartNumber,
             speedMaster,
@@ -211,6 +213,14 @@
                     <span class="label-hint">e.g. Song Number</span>
                 </label>
                 <input id="prefix" type="text" bind:value={prefix} class="input" />
+            </div>
+
+            <div class="input-group">
+                <label for="appearance-start-number" class="label">
+                    <span class="label-text">Appearance Start ID</span>
+                    <span class="label-hint">First id used for generated appearances</span>
+                </label>
+                <input id="appearance-start-number" type="number" min="1" max="9999" step="1" bind:value={appearanceStartNumber} class="input" />
             </div>
 
             <div class="input-group">

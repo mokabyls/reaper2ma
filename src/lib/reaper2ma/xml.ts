@@ -1,5 +1,6 @@
 import { XMLBuilder } from "fast-xml-parser";
 
+import { convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
 import type { BpmSequence, ConversionSettings, ConvertedMarker, RepeatedSequence } from "./types.js";
 
 const XML_HEADER = {
@@ -140,6 +141,33 @@ function createSpeedMasterCommand(sequenceNumber: number, speedMaster: string): 
     };
 }
 
+function createAppearanceCommands(sequence: RepeatedSequence): Record<string, string>[] {
+    const appearanceColor = convertReaperColorToGrandmaAppearanceColor(sequence.color);
+
+    if (!appearanceColor) {
+        return [];
+    }
+
+    return [
+        {
+            "@_Command": `Store Appearance ${sequence.appearanceNumber}`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Label Appearance ${sequence.appearanceNumber} "${sequence.appearanceName}"`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Set Appearance ${sequence.appearanceNumber} "Color" "${appearanceColor}"`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Assign Appearance "${sequence.appearanceName}" at Sequence ${sequence.sequenceNumber}`,
+            "@_Wait": "0.10",
+        },
+    ];
+}
+
 function createBpmSequenceMacroLines(bpmSequence: BpmSequence, speedMaster: string) {
     return [
         {
@@ -221,6 +249,7 @@ export function generateMacroXML(
                             "@_Wait": "0.10",
                         },
                         createSpeedMasterCommand(sequence.sequenceNumber, settings.speedMaster),
+                        ...createAppearanceCommands(sequence),
                         {
                             "@_Command": `Store Cue 1 Sequence ${sequence.sequenceNumber} /Merge`,
                             "@_Wait": "0.10",

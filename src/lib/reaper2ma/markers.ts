@@ -1,6 +1,7 @@
 import * as csv from "@vanillaes/csv";
 
 import type { ConvertedMarker, MarkerTag, ReaperMarkerRow, RepeatedSequence } from "./types.js";
+import { createAppearanceNameFromReaperColor } from "./colors.js";
 
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
 const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]\s*$/;
@@ -294,9 +295,11 @@ export function groupRepeatedSequences(
     repeatedMarkers: ConvertedMarker[],
     prefix: string,
     sequenceNumber: number,
+    appearanceStartNumber: number,
 ): RepeatedSequence[] {
     const repeatedSequences: RepeatedSequence[] = [];
     const sequencesByColor = new Map<string, RepeatedSequence>();
+    let nextAppearanceNumber = appearanceStartNumber;
     let nextSequenceNumber = sequenceNumber + 1;
 
     for (const marker of repeatedMarkers) {
@@ -319,6 +322,8 @@ export function groupRepeatedSequences(
                     execToken: marker.execToken,
                 },
             ],
+            appearanceName: createAppearanceNameFromReaperColor(marker.color),
+            appearanceNumber: nextAppearanceNumber++,
             sequenceNumber: nextSequenceNumber++,
         };
 

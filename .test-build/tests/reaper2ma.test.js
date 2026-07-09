@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
+import { convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseMarkerName, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
 const baseSettings = {
     sequenceNumber: 101,
+    appearanceStartNumber: 1,
     driveNumber: 2,
     cueStartNumber: 1,
     speedMaster: "3.4",
@@ -88,16 +90,20 @@ describe("marker normalization", () => {
             { displayName: "SD", execToken: "Goto", tags: [], start: "2", color: "19005190" },
             { displayName: "SD 2", execToken: "Temp|Flash", tags: [], start: "3", color: "19005190" },
             { displayName: "Crash", execToken: "Flash", tags: [], start: "4", color: "33554431" },
-        ], "1", 101);
+        ], "1", 101, 1);
         assert.deepEqual(repeatedSequences.map((sequence) => ({
             color: sequence.color,
             displayName: sequence.displayName,
+            appearanceName: sequence.appearanceName,
+            appearanceNumber: sequence.appearanceNumber,
             sequenceNumber: sequence.sequenceNumber,
             events: sequence.events,
         })), [
             {
                 color: "19005190",
                 displayName: "1 - SD",
+                appearanceName: "R2MA Color 19005190",
+                appearanceNumber: 1,
                 sequenceNumber: 102,
                 events: [
                     { timestamp: "2", execToken: "Goto" },
@@ -107,10 +113,17 @@ describe("marker normalization", () => {
             {
                 color: "33554431",
                 displayName: "1 - Crash",
+                appearanceName: "R2MA Color 33554431",
+                appearanceNumber: 2,
                 sequenceNumber: 103,
                 events: [{ timestamp: "4", execToken: "Flash" }],
             },
         ]);
+    });
+    it("converts Reaper color values to grandMA3 appearance colors", () => {
+        assert.equal(convertReaperColorToGrandmaAppearanceColor("19005190"), "12.9,100.0,2.4,100.0");
+        assert.equal(convertReaperColorToGrandmaAppearanceColor("33554431"), "100.0,100.0,100.0,100.0");
+        assert.equal(convertReaperColorToGrandmaAppearanceColor(""), undefined);
     });
 });
 describe("conversion artifacts", () => {
@@ -120,6 +133,13 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.uniqueCues.length, 3);
         assert.equal(artifacts.repeatedSequences.length, 2);
         assert.equal(artifacts.bpmSequence, undefined);
+        assert.equal(artifacts.macroXml.includes('Command="Store Appearance 1"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Label Appearance 1 &quot;R2MA Color 19005190&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Appearance 1 &quot;Color&quot; &quot;12.9,100.0,2.4,100.0&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 19005190&quot; at Sequence 102"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Store Appearance 2"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Label Appearance 2 &quot;R2MA Color 33554431&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 33554431&quot; at Sequence 103"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - SD'), true);
         assert.equal(artifacts.macroXml.includes('Store Sequence 101 Cue 1 thru 3'), true);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
@@ -162,6 +182,27 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.timecodeXml?.includes('ExecToken="Temp|Flash"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ExecToken="Flash"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ExecToken="Goto"'), true);
+    });
+    it("honors a configurable appearance start id", () => {
+        const csv = `#,Name,Start,Color
+1,SD,0,19005190
+2,Crash,1,33554431
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "appearances.csv", {
+            ...baseSettings,
+            appearanceStartNumber: 50,
+        });
+        assert.deepEqual(artifacts.repeatedSequences.map((sequence) => ({
+            appearanceName: sequence.appearanceName,
+            appearanceNumber: sequence.appearanceNumber,
+        })), [
+            { appearanceName: "R2MA Color 19005190", appearanceNumber: 50 },
+            { appearanceName: "R2MA Color 33554431", appearanceNumber: 51 },
+        ]);
+        assert.equal(artifacts.macroXml.includes('Command="Store Appearance 50"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Label Appearance 50 &quot;R2MA Color 19005190&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Store Appearance 51"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Label Appearance 51 &quot;R2MA Color 33554431&quot;"'), true);
     });
     it("creates a dedicated BPM sequence when BPM tags are present", () => {
         const csv = `#,Name,Start,Color

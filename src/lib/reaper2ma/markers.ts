@@ -1,6 +1,13 @@
 import * as csv from "@vanillaes/csv";
 
-import type { ConvertedMarker, MarkerTag, ReaperMarkerRow, RepeatedSequence } from "./types.js";
+import type {
+    BumpSequence,
+    ConvertedMarker,
+    MarkerTag,
+    ReaperMarkerRow,
+    RepeatedSequence,
+    SequenceCue,
+} from "./types.js";
 import { createAppearanceNameFromReaperColor } from "./colors.js";
 
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
@@ -17,6 +24,7 @@ const CANONICAL_EXECUTION_TOKENS: Record<string, string> = {
     flash: "Flash",
 };
 const BPM_VALUE_PATTERN = /^(?:\d+(?:\.\d+)?|\.\d+)$/;
+const START_CUE_NAME = "Start";
 
 export function sanitizeMarkerName(name: string): string {
     return name.replace(SAFE_MARKER_NAME_PATTERN, "");
@@ -28,6 +36,7 @@ type ParsedMarkerName = {
     tags: MarkerTag[];
     bpm?: number;
     bpmText?: string;
+    cueFade?: string;
 };
 
 export function parseMarkerName(name: string): ParsedMarkerName {
@@ -36,6 +45,7 @@ export function parseMarkerName(name: string): ParsedMarkerName {
     const { displayName: rawDisplayName, execToken: suffixExecToken } = parseExecutionSuffix(remainder);
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
     const bpmTag = tags.find((tag) => tag.key === "BPM" && tag.value !== null && isValidBpmValue(tag.value));
+    const cueFadeTag = tags.find((tag) => tag.key === "CUEFADE" && tag.value !== null && isValidCueFadeValue(tag.value));
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Goto";
 
     return {
@@ -46,6 +56,11 @@ export function parseMarkerName(name: string): ParsedMarkerName {
             ? {
                   bpm: Number.parseFloat(bpmTag.value as string),
                   bpmText: bpmTag.value as string,
+              }
+            : {}),
+        ...(cueFadeTag
+            ? {
+                  cueFade: cueFadeTag.value as string,
               }
             : {}),
     };
@@ -215,6 +230,10 @@ function isValidBpmValue(value: string): boolean {
     return BPM_VALUE_PATTERN.test(value) && Number.parseFloat(value) > 0;
 }
 
+function isValidCueFadeValue(value: string): boolean {
+    return value.trim().length > 0;
+}
+
 export function parseReaperMarkerRows(dataString: string): ReaperMarkerRow[] {
     const parsedLines = csv.parse(dataString) as string[][];
     const header = parsedLines[0] ?? [];
@@ -239,11 +258,8 @@ export function parseReaperMarkerRows(dataString: string): ReaperMarkerRow[] {
 }
 
 export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] {
-    const seenNameCount: Record<string, number> = {};
-
-    const sanitizedRows = rows.map((row) => {
+    return rows.map((row) => {
         const marker = parseMarkerName(row.Name);
-        seenNameCount[marker.displayName] = (seenNameCount[marker.displayName] || 0) + 1;
 
         return {
             displayName: marker.displayName,
@@ -257,37 +273,27 @@ export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] 
                       bpmText: marker.bpmText,
                   }
                 : {}),
+            ...(marker.cueFade !== undefined
+                ? {
+                      cueFade: marker.cueFade,
+                  }
+                : {}),
         };
     });
-
-    const remainingNames = { ...seenNameCount };
-
-    return sanitizedRows
-        .slice()
-        .reverse()
-        .map((row) => {
-            const remaining = remainingNames[row.displayName] ?? 0;
-
-            if (remaining > 1) {
-                remainingNames[row.displayName] = remaining - 1;
-                return {
-                    ...row,
-                    displayName: `${row.displayName} ${remaining}`,
-                };
-            }
-
-            return row;
-        })
-        .reverse();
 }
 
 export function splitMarkerRows(markers: ConvertedMarker[]): {
     uniqueCues: ConvertedMarker[];
     repeatedMarkers: ConvertedMarker[];
+    bumpMarkers: ConvertedMarker[];
 } {
+    const bumpMarkers = markers.filter((marker) => isBumpExecutionToken(marker.execToken));
+    const nonBumpMarkers = markers.filter((marker) => !isBumpExecutionToken(marker.execToken));
+
     return {
-        uniqueCues: markers.filter((marker) => !marker.color),
-        repeatedMarkers: markers.filter((marker) => marker.color),
+        uniqueCues: nonBumpMarkers.filter((marker) => !marker.color),
+        repeatedMarkers: nonBumpMarkers.filter((marker) => marker.color),
+        bumpMarkers,
     };
 }
 
@@ -298,28 +304,62 @@ export function groupRepeatedSequences(
     appearanceStartNumber: number,
 ): RepeatedSequence[] {
     const repeatedSequences: RepeatedSequence[] = [];
-    const sequencesByColor = new Map<string, RepeatedSequence>();
+    const sequencesByColor = new Map<
+        string,
+        {
+            sequence: RepeatedSequence;
+            cueNumbersByName: Map<string, number>;
+        }
+    >();
+    const usedSequenceNames = new Map<string, number>();
     let nextAppearanceNumber = appearanceStartNumber;
     let nextSequenceNumber = sequenceNumber + 1;
 
     for (const marker of repeatedMarkers) {
-        const existing = sequencesByColor.get(marker.color);
+        let existing = sequencesByColor.get(marker.color);
 
         if (existing) {
-            existing.events.push({
+            const cueNumber = resolveSequenceCueNumber(existing, marker.displayName, marker.cueFade);
+
+            existing.sequence.events.push({
                 timestamp: marker.start,
                 execToken: marker.execToken,
+                cueNumber,
+                cueName: resolveCueName(existing.sequence.cues, cueNumber),
+                ...(marker.cueFade !== undefined
+                    ? {
+                          cueFade: marker.cueFade,
+                      }
+                    : {}),
             });
             continue;
         }
 
         const repeatedSequence: RepeatedSequence = {
             color: marker.color,
-            displayName: `${prefix} - ${marker.displayName}`,
+            displayName: createUniqueSequenceName(`${prefix} - ${marker.displayName}`, usedSequenceNames),
+            cues: [
+                {
+                    cueNumber: 1,
+                    name: START_CUE_NAME,
+                    ...(marker.cueFade !== undefined
+                        ? {
+                              cueFade: marker.cueFade,
+                          }
+                        : {}),
+                },
+            ],
             events: [
                 {
                     timestamp: marker.start,
                     execToken: marker.execToken,
+                    cueNumber: 1,
+                    cueName: START_CUE_NAME,
+                    ...(marker.cueFade !== undefined
+                        ? {
+                              cueFade: marker.cueFade,
+                          }
+                        : {}),
                 },
             ],
             appearanceName: createAppearanceNameFromReaperColor(marker.color),
@@ -327,9 +367,146 @@ export function groupRepeatedSequences(
             sequenceNumber: nextSequenceNumber++,
         };
 
-        sequencesByColor.set(marker.color, repeatedSequence);
+        existing = {
+            sequence: repeatedSequence,
+            cueNumbersByName: new Map<string, number>([
+                [START_CUE_NAME, 1],
+                [marker.displayName, 1],
+            ]),
+        };
+
+        sequencesByColor.set(marker.color, existing);
         repeatedSequences.push(repeatedSequence);
     }
 
     return repeatedSequences;
+}
+
+export function groupBumpSequences(
+    bumpMarkers: ConvertedMarker[],
+    sequenceNumber: number,
+    prefix: string,
+    baseSequenceNamesByColor: Map<string, string>,
+): BumpSequence[] {
+    const bumpSequences: BumpSequence[] = [];
+    const sequencesByKey = new Map<
+        string,
+        {
+            sequence: BumpSequence;
+            cueNumbersByName: Map<string, number>;
+        }
+    >();
+    const usedSequenceNames = new Map<string, number>();
+    let nextSequenceNumber = sequenceNumber + 1;
+
+    for (const marker of bumpMarkers) {
+        const sequenceKey = `${marker.color}::${marker.displayName}`;
+        const existing = sequencesByKey.get(sequenceKey);
+
+        if (existing) {
+            existing.sequence.events.push({
+                timestamp: marker.start,
+                execToken: marker.execToken,
+                cueNumber: 1,
+                cueName: START_CUE_NAME,
+                ...(marker.cueFade !== undefined
+                    ? {
+                          cueFade: marker.cueFade,
+                      }
+                    : {}),
+            });
+            continue;
+        }
+
+        const baseSequenceName = baseSequenceNamesByColor.get(marker.color) ?? prefix;
+        const bumpSequence: BumpSequence = {
+            color: marker.color,
+            displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
+            cues: [
+                {
+                    cueNumber: 1,
+                    name: START_CUE_NAME,
+                    ...(marker.cueFade !== undefined
+                        ? {
+                              cueFade: marker.cueFade,
+                          }
+                        : {}),
+                },
+            ],
+            events: [
+                {
+                    timestamp: marker.start,
+                    execToken: marker.execToken,
+                    cueNumber: 1,
+                    cueName: START_CUE_NAME,
+                    ...(marker.cueFade !== undefined
+                        ? {
+                              cueFade: marker.cueFade,
+                          }
+                        : {}),
+                },
+            ],
+            sequenceNumber: nextSequenceNumber++,
+        };
+
+        sequencesByKey.set(sequenceKey, {
+            sequence: bumpSequence,
+            cueNumbersByName: new Map<string, number>([[START_CUE_NAME, 1]]),
+        });
+        bumpSequences.push(bumpSequence);
+    }
+
+    return bumpSequences;
+}
+
+function createUniqueSequenceName(name: string, usedSequenceNames: Map<string, number>): string {
+    const currentCount = usedSequenceNames.get(name) ?? 0;
+    usedSequenceNames.set(name, currentCount + 1);
+
+    if (currentCount === 0) {
+        return name;
+    }
+
+    return `${name} ${currentCount + 1}`;
+}
+
+function isBumpExecutionToken(execToken: string): boolean {
+    return execToken
+        .split("|")
+        .map((part) => part.trim().toLowerCase())
+        .some((part) => part === "temp" || part === "flash");
+}
+
+function resolveSequenceCueNumber(
+    existing: {
+        sequence: RepeatedSequence;
+        cueNumbersByName: Map<string, number>;
+    },
+    cueName: string,
+    cueFade?: string,
+): number {
+    const existingCueNumber = existing.cueNumbersByName.get(cueName);
+
+    if (existingCueNumber) {
+        return existingCueNumber;
+    }
+
+    const cueNumber = existing.sequence.cues.length + 1;
+
+    existing.sequence.cues.push({
+        cueNumber,
+        name: cueName,
+        ...(cueFade !== undefined
+            ? {
+                  cueFade,
+              }
+            : {}),
+    });
+    existing.cueNumbersByName.set(cueName, cueNumber);
+
+    return cueNumber;
+}
+
+function resolveCueName(cues: SequenceCue[], cueNumber: number): string {
+    return cues.find((cue) => cue.cueNumber === cueNumber)?.name ?? START_CUE_NAME;
 }

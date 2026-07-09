@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
 import { convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
-import { groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseMarkerName, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
+import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseMarkerName, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
 import type { ConversionSettings } from "../src/lib/reaper2ma/types.js";
 
 const baseSettings: ConversionSettings = {
@@ -61,6 +61,15 @@ describe("marker normalization", () => {
             bpm: 129.5,
             bpmText: "129.5",
         });
+        assert.deepEqual(parseMarkerName("[CueFade_6/12|X_foo|Temp] Intro"), {
+            displayName: "Intro",
+            execToken: "Temp",
+            tags: [
+                { key: "CUEFADE", value: "6/12" },
+                { key: "X", value: "foo" },
+            ],
+            cueFade: "6/12",
+        });
         assert.deepEqual(parseMarkerName("[TEMP] Intro"), {
             displayName: "Intro",
             execToken: "Temp",
@@ -87,7 +96,14 @@ describe("marker normalization", () => {
         });
     });
 
-    it("suffixes duplicate names in chronological order", () => {
+    it("ignores empty cue fade metadata", () => {
+        const marker = parseMarkerName("[CueFade_] Intro");
+
+        assert.equal(marker.cueFade, undefined);
+        assert.deepEqual(marker.tags, [{ key: "CUEFADE", value: null }]);
+    });
+
+    it("preserves sanitized marker names before sequence-local dedupe", () => {
         const markers = normalizeMarkerRows([
             { "#": "1", Name: "Intro!", Start: "0", Color: "" },
             { "#": "2", Name: "Intro!", Start: "1", Color: "" },
@@ -96,16 +112,16 @@ describe("marker normalization", () => {
 
         assert.deepEqual(
             markers.map((marker) => marker.displayName),
-            ["Intro", "Intro 2", "Crash"],
+            ["Intro", "Intro", "Crash"],
         );
     });
 
-    it("groups repeated markers by exact color and first appearance", () => {
+    it("groups repeated markers by exact color and reuses cue names locally", () => {
         const repeatedSequences = groupRepeatedSequences(
             [
-                { displayName: "SD", execToken: "Goto", tags: [], start: "2", color: "19005190" },
-                { displayName: "SD 2", execToken: "Temp|Flash", tags: [], start: "3", color: "19005190" },
-                { displayName: "Crash", execToken: "Flash", tags: [], start: "4", color: "33554431" },
+                { displayName: "Intro", execToken: "Goto", tags: [], start: "2", color: "19005190" },
+                { displayName: "Hit", execToken: "Load", tags: [], start: "3", color: "19005190" },
+                { displayName: "Intro", execToken: "Goto", tags: [], start: "4", color: "33554431" },
             ],
             "1",
             101,
@@ -116,6 +132,7 @@ describe("marker normalization", () => {
             repeatedSequences.map((sequence) => ({
                 color: sequence.color,
                 displayName: sequence.displayName,
+                cues: sequence.cues,
                 appearanceName: sequence.appearanceName,
                 appearanceNumber: sequence.appearanceNumber,
                 sequenceNumber: sequence.sequenceNumber,
@@ -124,22 +141,72 @@ describe("marker normalization", () => {
             [
                 {
                     color: "19005190",
-                    displayName: "1 - SD",
+                    displayName: "1 - Intro",
+                    cues: [
+                        { cueNumber: 1, name: "Start" },
+                        { cueNumber: 2, name: "Hit" },
+                    ],
                     appearanceName: "R2MA Color 19005190",
                     appearanceNumber: 1,
                     sequenceNumber: 102,
                     events: [
-                        { timestamp: "2", execToken: "Goto" },
-                        { timestamp: "3", execToken: "Temp|Flash" },
+                        { timestamp: "2", execToken: "Goto", cueNumber: 1, cueName: "Start" },
+                        { timestamp: "3", execToken: "Load", cueNumber: 2, cueName: "Hit" },
                     ],
                 },
                 {
                     color: "33554431",
-                    displayName: "1 - Crash",
+                    displayName: "1 - Intro 2",
+                    cues: [{ cueNumber: 1, name: "Start" }],
                     appearanceName: "R2MA Color 33554431",
                     appearanceNumber: 2,
                     sequenceNumber: 103,
-                    events: [{ timestamp: "4", execToken: "Flash" }],
+                    events: [{ timestamp: "4", execToken: "Goto", cueNumber: 1, cueName: "Start" }],
+                },
+            ],
+        );
+    });
+
+    it("routes bump markers into their own overlay sequences", () => {
+        const bumpSequences = groupBumpSequences(
+            [
+                { displayName: "HIT", execToken: "Temp", tags: [], start: "5", color: "19005190" },
+                { displayName: "HIT", execToken: "Flash", tags: [], start: "7", color: "19005190" },
+                { displayName: "HIT", execToken: "Temp", tags: [], start: "9", color: "33554431" },
+            ],
+            103,
+            "1",
+            new Map([
+                ["19005190", "1 - Intro"],
+                ["33554431", "1 - Verse"],
+            ]),
+        );
+
+        assert.deepEqual(
+            bumpSequences.map((sequence) => ({
+                color: sequence.color,
+                displayName: sequence.displayName,
+                cues: sequence.cues,
+                sequenceNumber: sequence.sequenceNumber,
+                events: sequence.events,
+            })),
+            [
+                {
+                    color: "19005190",
+                    displayName: "1 - Intro - BUMP - HIT",
+                    cues: [{ cueNumber: 1, name: "Start" }],
+                    sequenceNumber: 104,
+                    events: [
+                        { timestamp: "5", execToken: "Temp", cueNumber: 1, cueName: "Start" },
+                        { timestamp: "7", execToken: "Flash", cueNumber: 1, cueName: "Start" },
+                    ],
+                },
+                {
+                    color: "33554431",
+                    displayName: "1 - Verse - BUMP - HIT",
+                    cues: [{ cueNumber: 1, name: "Start" }],
+                    sequenceNumber: 105,
+                    events: [{ timestamp: "9", execToken: "Temp", cueNumber: 1, cueName: "Start" }],
                 },
             ],
         );
@@ -159,6 +226,7 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.outputBaseName, "songcsv");
         assert.equal(artifacts.uniqueCues.length, 3);
         assert.equal(artifacts.repeatedSequences.length, 2);
+        assert.equal(artifacts.bumpSequences.length, 0);
         assert.equal(artifacts.bpmSequence, undefined);
         assert.equal(artifacts.macroXml.includes('Command="Store Appearance 1"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Label Appearance 1 &quot;R2MA Color 19005190&quot;"'), true);
@@ -167,7 +235,13 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.macroXml.includes('Command="Store Appearance 2"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Label Appearance 2 &quot;R2MA Color 33554431&quot;"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 33554431&quot; at Sequence 103"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - SD'), true);
+        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 1 &quot;Intro&quot;'), true);
+        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 2 &quot;Intro 2&quot;'), true);
+        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 3 &quot;Outro&quot;'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Label Sequence 102 Cue 1 &quot;Start&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Label Sequence 103 Cue 1 &quot;Start&quot;"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.Sequence 101.Intro 2'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - SD.Start'), true);
         assert.equal(artifacts.macroXml.includes('Store Sequence 101 Cue 1 thru 3'), true);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
@@ -194,28 +268,31 @@ describe("conversion artifacts", () => {
 
     it("parses raw CSV rows with the expected headers", () => {
         const rows = parseReaperMarkerRows(fixtureCsv);
-        const { uniqueCues, repeatedMarkers } = splitMarkerRows(normalizeMarkerRows(rows));
+        const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(normalizeMarkerRows(rows));
 
         assert.equal(uniqueCues.length, 3);
         assert.equal(repeatedMarkers.length, 3);
+        assert.equal(bumpMarkers.length, 0);
         assert.equal(uniqueCues[0].displayName, "Intro");
-        assert.equal(uniqueCues[0].execToken, "Goto");
+        assert.equal(uniqueCues[1].displayName, "Intro");
+        assert.equal(uniqueCues[2].displayName, "Outro");
         assert.equal(repeatedMarkers[0].displayName, "SD");
-        assert.equal(repeatedMarkers[1].execToken, "Goto");
+        assert.equal(repeatedMarkers[1].displayName, "SD");
     });
 
     it("uses the execution token from a bracket suffix in generated XML", () => {
         const csv = `#,Name,Start,Color
-1,Intro [Temp|Flash],0,
-2,SD [Flash],1,19005190
+1,Intro [Load],0,
+2,SD [Go+],1,19005190
 3,SD,2,19005190
 `;
         const artifacts = convertReaperCsvToArtifacts(csv, "tokens.csv", baseSettings);
 
         assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 1 &quot;Intro&quot;'), true);
-        assert.equal(artifacts.timecodeXml?.includes('Name="Temp|Flash"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Temp|Flash"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Flash"'), true);
+        assert.equal(artifacts.macroXml.includes('Label Sequence 102 Cue 1 &quot;Start&quot;'), true);
+        assert.equal(artifacts.timecodeXml?.includes('Name="Load"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Load"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Go+"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ExecToken="Goto"'), true);
     });
 
@@ -247,15 +324,16 @@ describe("conversion artifacts", () => {
 
     it("creates a dedicated BPM sequence when BPM tags are present", () => {
         const csv = `#,Name,Start,Color
-1,[BPM_129.5|X_foo] Intro [Temp|Flash],0,
+1,[BPM_129.5|X_foo] Intro [Load],0,
 2,Verse,1,
-3,[BPM_123.45] SD [Flash],2,19005190
+3,[BPM_123.45] SD [Go+],2,19005190
 4,SD,3,19005190
 `;
         const artifacts = convertReaperCsvToArtifacts(csv, "bpm.csv", baseSettings);
 
         assert.equal(artifacts.uniqueCues.length, 2);
         assert.equal(artifacts.repeatedSequences.length, 1);
+        assert.equal(artifacts.bumpSequences.length, 0);
         assert.equal(artifacts.bpmSequence?.sequenceNumber, 103);
         assert.equal(artifacts.bpmSequence?.events.length, 2);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
@@ -269,6 +347,26 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.timecodeXml?.includes('Cue 1.Part 1'), true);
     });
 
+    it("applies cue fade commands to unique, repeated and bump cues", () => {
+        const csv = `#,Name,Start,Color
+1,[CueFade_5] Intro,0,
+2,Verse,1,
+3,[CueFade_6/12] Intro,2,19005190
+4,[CueFade_3/] Hit,3,19005190
+5,[Temp|CueFade_*2] Flash,4,19005190
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "cuefade.csv", baseSettings);
+
+        assert.equal(artifacts.uniqueCues[0].cueFade, "5");
+        assert.equal(artifacts.repeatedSequences[0].cues[0].cueFade, "6/12");
+        assert.equal(artifacts.repeatedSequences[0].cues[1].cueFade, "3/");
+        assert.equal(artifacts.bumpSequences[0].cues[0].cueFade, "*2");
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Cue &quot;Intro&quot; CueFade 5"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Start&quot; CueFade 6/12"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Hit&quot; CueFade 3/"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Cue &quot;Start&quot; CueFade *2"'), true);
+    });
+
     it("ignores invalid BPM tags without creating a BPM sequence", () => {
         const csv = `#,Name,Start,Color
 1,[BPM_bad] Intro,0,
@@ -279,5 +377,29 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.bpmSequence, undefined);
         assert.equal(artifacts.uniqueCues[0].displayName, "Intro");
         assert.equal(artifacts.uniqueCues[0].bpm, undefined);
+    });
+
+    it("creates bump overlay sequences for Temp and Flash markers", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,0,19005190
+2,[Temp] HIT,1,19005190
+3,[Flash] HIT,2,19005190
+4,Verse,3,33554431
+5,[Temp] HIT,4,33554431
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "bump.csv", baseSettings);
+
+        assert.equal(artifacts.repeatedSequences.length, 2);
+        assert.equal(artifacts.bumpSequences.length, 2);
+        assert.equal(artifacts.bumpSequences[0].color, "19005190");
+        assert.equal(artifacts.bumpSequences[0].displayName, "1 - Intro - BUMP - HIT");
+        assert.equal(artifacts.bumpSequences[0].cues[0].name, "Start");
+        assert.equal(artifacts.bumpSequences[0].events[0].cueName, "Start");
+        assert.equal(artifacts.bumpSequences[0].events[1].cueName, "Start");
+        assert.equal(artifacts.bumpSequences[1].color, "33554431");
+        assert.equal(artifacts.bumpSequences[1].displayName, "1 - Verse - BUMP - HIT");
+        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 104 &quot;1 - Intro - BUMP - HIT&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 105 &quot;1 - Verse - BUMP - HIT&quot;"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - Intro - BUMP - HIT.Start'), true);
     });
 });

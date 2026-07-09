@@ -1,7 +1,7 @@
 import { XMLBuilder } from "fast-xml-parser";
 
 import { convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
-import type { BpmSequence, ConversionSettings, ConvertedMarker, RepeatedSequence } from "./types.js";
+import type { BpmSequence, BumpSequence, ConversionSettings, ConvertedMarker, RepeatedSequence, SequenceCue } from "./types.js";
 
 const XML_HEADER = {
     "?xml": {
@@ -61,14 +61,60 @@ function createTimecodeDestination(sequenceName: string, cueNumber: number, useC
     return useCuePart ? `${sequenceName}.Cue ${cueNumber}.Part 1` : `${sequenceName}.Cue ${cueNumber}`;
 }
 
-function createEventsForCueSequence(sequenceNumber: number, uniqueCues: ConvertedMarker[]) {
-    return uniqueCues.map((item, index) => ({
+function createSequenceCueDestination(sequenceName: string, cueName: string): string {
+    return `ShowData.DataPools.Default.Sequences.${sequenceName}.${cueName}`;
+}
+
+function createUniqueCuePlan(uniqueCues: ConvertedMarker[]): Array<ConvertedMarker & { cueName: string }> {
+    const seenNames = new Map<string, number>();
+
+    return uniqueCues.map((marker) => {
+        const nextIndex = (seenNames.get(marker.displayName) ?? 0) + 1;
+        seenNames.set(marker.displayName, nextIndex);
+
+        return {
+            ...marker,
+            cueName: nextIndex === 1 ? marker.displayName : `${marker.displayName} ${nextIndex}`,
+        };
+    });
+}
+
+function createEventsForUniqueCues(sequenceNumber: number, uniqueCues: ConvertedMarker[]) {
+    const cuePlan = createUniqueCuePlan(uniqueCues);
+
+    return cuePlan.map((item, index) => ({
         "@_Name": item.execToken,
         "@_Time": item.start,
         RealtimeCmd: createRealtimeExecutionCommand(
             item.execToken,
             `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}`,
-            `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}.${item.displayName}`,
+            createSequenceCueDestination(`Sequence ${sequenceNumber}`, item.cueName),
+            index === 0,
+        ),
+    }));
+}
+
+function createEventsForRepeatedSequence(sequenceName: string, events: RepeatedSequence["events"]) {
+    return events.map((event, index) => ({
+        "@_Name": event.execToken,
+        "@_Time": event.timestamp,
+        RealtimeCmd: createRealtimeExecutionCommand(
+            event.execToken,
+            `ShowData.DataPools.Default.Sequences.${sequenceName}`,
+            createSequenceCueDestination(sequenceName, event.cueName),
+            index === 0,
+        ),
+    }));
+}
+
+function createEventsForBumpSequence(sequenceName: string, events: BumpSequence["events"]) {
+    return events.map((event, index) => ({
+        "@_Name": event.execToken,
+        "@_Time": event.timestamp,
+        RealtimeCmd: createRealtimeExecutionCommand(
+            event.execToken,
+            `ShowData.DataPools.Default.Sequences.${sequenceName}`,
+            createSequenceCueDestination(sequenceName, event.cueName),
             index === 0,
         ),
     }));
@@ -87,20 +133,7 @@ function createEventsForBpmSequence(sequenceNumber: number, bpmSequence: BpmSequ
     }));
 }
 
-function createEventsForRepeatedSequence(sequenceName: string, events: RepeatedSequence["events"]) {
-    return events.map((event, index) => ({
-        "@_Name": event.execToken,
-        "@_Time": event.timestamp,
-        RealtimeCmd: createRealtimeExecutionCommand(
-            event.execToken,
-            `ShowData.DataPools.Default.Sequences.${sequenceName}`,
-            `ShowData.DataPools.Default.Sequences.${sequenceName}.Cue 1`,
-            index === 0,
-        ),
-    }));
-}
-
-function createRepeatedSequenceTrack(sequenceName: string, events: RepeatedSequence["events"]) {
+function createColorSequenceTrack(sequenceName: string, events: RepeatedSequence["events"]) {
     return {
         "@_Guid": generateGuid(),
         "@_Target": `ShowData.DataPools.Default.Sequences.${sequenceName}`,
@@ -112,6 +145,23 @@ function createRepeatedSequenceTrack(sequenceName: string, events: RepeatedSeque
             "@_Rec": "",
             CmdSubTrack: {
                 CmdEvent: createEventsForRepeatedSequence(sequenceName, events),
+            },
+        },
+    };
+}
+
+function createBumpSequenceTrack(sequenceName: string, events: BumpSequence["events"]) {
+    return {
+        "@_Guid": generateGuid(),
+        "@_Target": `ShowData.DataPools.Default.Sequences.${sequenceName}`,
+        "@_Play": "",
+        "@_Rec": "",
+        TimeRange: {
+            "@_Guid": generateGuid(),
+            "@_Play": "",
+            "@_Rec": "",
+            CmdSubTrack: {
+                CmdEvent: createEventsForBumpSequence(sequenceName, events),
             },
         },
     };
@@ -168,6 +218,86 @@ function createAppearanceCommands(sequence: RepeatedSequence): Record<string, st
     ];
 }
 
+function createCueLabelCommands(sequenceNumber: number, cues: SequenceCue[]): Record<string, string>[] {
+    return cues.map((cue) => ({
+        "@_Command": `Label Sequence ${sequenceNumber} Cue ${cue.cueNumber} "${cue.name}"`,
+        "@_Wait": "0.10",
+    }));
+}
+
+type CueFadeCommandSource = {
+    cueFade?: string;
+} & (
+    | {
+          name: string;
+      }
+    | {
+          cueName: string;
+      }
+);
+
+function createCueFadeCommands(sequenceNumber: number, cues: CueFadeCommandSource[]): Record<string, string>[] {
+    return cues.flatMap((cue) =>
+        cue.cueFade
+            ? [
+                  {
+                      "@_Command": `Set Sequence ${sequenceNumber} Cue "${"name" in cue ? cue.name : cue.cueName}" CueFade ${cue.cueFade}`,
+                      "@_Wait": "0.10",
+                  },
+              ]
+            : [],
+    );
+}
+
+function createColorSequenceMacroLines(sequence: RepeatedSequence, speedMaster: string): Record<string, string>[] {
+    return [
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} "${sequence.displayName}"`,
+            "@_Wait": "0.10",
+        },
+        createSpeedMasterCommand(sequence.sequenceNumber, speedMaster),
+        ...createAppearanceCommands(sequence),
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length}`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length} Part 0.1`,
+            "@_Wait": "0.10",
+        },
+        ...createCueLabelCommands(sequence.sequenceNumber, sequence.cues),
+        ...createCueFadeCommands(sequence.sequenceNumber, sequence.cues),
+        {
+            "@_Command": `Set Sequence ${sequence.sequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`,
+            "@_Wait": "0.10",
+        },
+    ];
+}
+
+function createBumpSequenceMacroLines(sequence: BumpSequence, speedMaster: string): Record<string, string>[] {
+    return [
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} "${sequence.displayName}"`,
+            "@_Wait": "0.10",
+        },
+        createSpeedMasterCommand(sequence.sequenceNumber, speedMaster),
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length}`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length} Part 0.1`,
+            "@_Wait": "0.10",
+        },
+        ...createCueLabelCommands(sequence.sequenceNumber, sequence.cues),
+        ...createCueFadeCommands(sequence.sequenceNumber, sequence.cues),
+        {
+            "@_Command": `Set Sequence ${sequence.sequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`,
+            "@_Wait": "0.10",
+        },
+    ];
+}
+
 function createBpmSequenceMacroLines(bpmSequence: BpmSequence, speedMaster: string) {
     return [
         {
@@ -200,10 +330,16 @@ function collectTimestampValues(collections: Array<Array<{ start?: string; times
     );
 }
 
-function createTimecodeDuration(uniqueCues: ConvertedMarker[], repeatedSequences: RepeatedSequence[], bpmSequence?: BpmSequence): string {
+function createTimecodeDuration(
+    uniqueCues: ConvertedMarker[],
+    repeatedSequences: RepeatedSequence[],
+    bumpSequences: BumpSequence[],
+    bpmSequence?: BpmSequence,
+): string {
     const timestamps = collectTimestampValues([
         uniqueCues,
         repeatedSequences.flatMap((sequence) => sequence.events),
+        bumpSequences.flatMap((sequence) => sequence.events),
         bpmSequence?.events ?? [],
     ]);
 
@@ -223,9 +359,11 @@ export function generateMacroXML(
     settings: ConversionSettings,
     uniqueCues: ConvertedMarker[],
     repeatedSequences: RepeatedSequence[],
+    bumpSequences: BumpSequence[],
     bpmSequence: BpmSequence | undefined,
     filename: string,
 ): string {
+    const uniqueCuePlan = createUniqueCuePlan(uniqueCues);
     const obj = {
         ...XML_HEADER,
         GMA3: {
@@ -239,26 +377,13 @@ export function generateMacroXML(
                         "@_Wait": "0.10",
                     },
                     createSpeedMasterCommand(settings.sequenceNumber, settings.speedMaster),
-                    ...uniqueCues.map((item, index) => ({
-                        "@_Command": `Label Sequence ${settings.sequenceNumber} Cue ${index + settings.cueStartNumber} "${item.displayName}"`,
+                    ...uniqueCuePlan.map((item, index) => ({
+                        "@_Command": `Label Sequence ${settings.sequenceNumber} Cue ${index + settings.cueStartNumber} "${item.cueName}"`,
                         "@_Wait": "0.10",
                     })),
-                    ...repeatedSequences.flatMap((sequence) => [
-                        {
-                            "@_Command": `Store Sequence ${sequence.sequenceNumber} "${sequence.displayName}"`,
-                            "@_Wait": "0.10",
-                        },
-                        createSpeedMasterCommand(sequence.sequenceNumber, settings.speedMaster),
-                        ...createAppearanceCommands(sequence),
-                        {
-                            "@_Command": `Store Cue 1 Sequence ${sequence.sequenceNumber} /Merge`,
-                            "@_Wait": "0.10",
-                        },
-                        {
-                            "@_Command": `Set Sequence ${sequence.sequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`,
-                            "@_Wait": "0.10",
-                        },
-                    ]),
+                    ...createCueFadeCommands(settings.sequenceNumber, uniqueCuePlan),
+                    ...repeatedSequences.flatMap((sequence) => createColorSequenceMacroLines(sequence, settings.speedMaster)),
+                    ...bumpSequences.flatMap((sequence) => createBumpSequenceMacroLines(sequence, settings.speedMaster)),
                     ...(bpmSequence ? createBpmSequenceMacroLines(bpmSequence, settings.speedMaster) : []),
                     ...(settings.exportMode === "cues-and-timecode"
                         ? [
@@ -284,10 +409,12 @@ export function generateTimecodeXML(
     settings: ConversionSettings,
     uniqueCues: ConvertedMarker[],
     repeatedSequences: RepeatedSequence[],
+    bumpSequences: BumpSequence[],
     bpmSequence: BpmSequence | undefined,
     filename: string,
 ): string {
-    const duration = createTimecodeDuration(uniqueCues, repeatedSequences, bpmSequence);
+    const duration = createTimecodeDuration(uniqueCues, repeatedSequences, bumpSequences, bpmSequence);
+    const uniqueCuePlan = createUniqueCuePlan(uniqueCues);
 
     const trackGroups = [
         {
@@ -307,7 +434,7 @@ export function generateTimecodeXML(
                     "@_Play": "",
                     "@_Rec": "",
                     CmdSubTrack: {
-                        CmdEvent: createEventsForCueSequence(settings.sequenceNumber, uniqueCues),
+                        CmdEvent: createEventsForUniqueCues(settings.sequenceNumber, uniqueCuePlan),
                     },
                 },
             },
@@ -316,10 +443,19 @@ export function generateTimecodeXML(
             "@_Play": "",
             "@_Rec": "",
             MarkerTrack: {
-                "@_Name": "Marker",
+                "@_Name": "Bump",
                 "@_Guid": "00 00 00 00 B1 F5 25 5F 70 04 00 00 28 74 D0 4C",
             },
-            Track: repeatedSequences.map((sequence) => createRepeatedSequenceTrack(sequence.displayName, sequence.events)),
+            Track: repeatedSequences.map((sequence) => createColorSequenceTrack(sequence.displayName, sequence.events)),
+        },
+        {
+            "@_Play": "",
+            "@_Rec": "",
+            MarkerTrack: {
+                "@_Name": "Bump",
+                "@_Guid": generateGuid(),
+            },
+            Track: bumpSequences.map((sequence) => createBumpSequenceTrack(sequence.displayName, sequence.events)),
         },
     ];
 

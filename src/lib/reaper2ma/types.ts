@@ -20,19 +20,38 @@ export type ConvertedMarker = {
     color: string;
     bpm?: number;
     bpmText?: string;
+    cueFade?: string;
 };
 
-export type RepeatedSequenceEvent = {
+export type SequenceCue = {
+    cueNumber: number;
+    name: string;
+    cueFade?: string;
+};
+
+export type SequenceTrigger = {
     timestamp: string;
     execToken: string;
+    cueNumber: number;
+    cueName: string;
+    cueFade?: string;
 };
 
 export type RepeatedSequence = {
     color: string;
     displayName: string;
-    events: RepeatedSequenceEvent[];
+    cues: SequenceCue[];
+    events: SequenceTrigger[];
     appearanceName: string;
     appearanceNumber: number;
+    sequenceNumber: number;
+};
+
+export type BumpSequence = {
+    color: string;
+    displayName: string;
+    cues: SequenceCue[];
+    events: SequenceTrigger[];
     sequenceNumber: number;
 };
 
@@ -63,6 +82,7 @@ export type ConversionArtifacts = {
     outputBaseName: string;
     uniqueCues: ConvertedMarker[];
     repeatedSequences: RepeatedSequence[];
+    bumpSequences: BumpSequence[];
     bpmSequence?: BpmSequence;
     macroXml: string;
     timecodeXml?: string;

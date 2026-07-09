@@ -8,15 +8,21 @@ export type ReaperMarkerRow = {
 };
 
 export type ConvertedMarker = {
-    name: string;
+    displayName: string;
+    execToken: string;
     start: string;
     color: string;
 };
 
+export type RepeatedSequenceEvent = {
+    timestamp: string;
+    execToken: string;
+};
+
 export type RepeatedSequence = {
     color: string;
-    name: string;
-    timestamps: string[];
+    displayName: string;
+    events: RepeatedSequenceEvent[];
     sequenceNumber: number;
 };
 
@@ -24,6 +30,7 @@ export type ConversionSettings = {
     sequenceNumber: number;
     driveNumber: number;
     cueStartNumber: number;
+    speedMaster: string;
     prefix: string;
     exportMode: ExportMode;
 };

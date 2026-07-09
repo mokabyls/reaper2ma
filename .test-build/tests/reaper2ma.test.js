@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
-import { groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
+import { groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
 const baseSettings = {
     sequenceNumber: 101,
     driveNumber: 2,
     cueStartNumber: 1,
+    speedMaster: "3.4",
     prefix: "1",
     exportMode: "cues-and-timecode",
 };
@@ -16,37 +17,54 @@ describe("marker normalization", () => {
     it("preserves allowed marker characters and removes unsupported ones", () => {
         assert.equal(sanitizeMarkerName('Crash! "Main" / Intro'), "Crash Main / Intro");
     });
+    it("extracts a final bracketed execution token when present", () => {
+        assert.deepEqual(parseMarkerExecution("Intro [Temp|Flash]"), {
+            displayName: "Intro",
+            execToken: "Temp|Flash",
+        });
+        assert.deepEqual(parseMarkerExecution("Intro [Temp | Flash]"), {
+            displayName: "Intro",
+            execToken: "Temp|Flash",
+        });
+        assert.deepEqual(parseMarkerExecution("Intro [Boom]"), {
+            displayName: "Intro",
+            execToken: "Goto",
+        });
+    });
     it("suffixes duplicate names in chronological order", () => {
         const markers = normalizeMarkerRows([
             { "#": "1", Name: "Intro!", Start: "0", Color: "" },
             { "#": "2", Name: "Intro!", Start: "1", Color: "" },
             { "#": "3", Name: "Crash", Start: "2", Color: "19005190" },
         ]);
-        assert.deepEqual(markers.map((marker) => marker.name), ["Intro", "Intro 2", "Crash"]);
+        assert.deepEqual(markers.map((marker) => marker.displayName), ["Intro", "Intro 2", "Crash"]);
     });
     it("groups repeated markers by exact color and first appearance", () => {
         const repeatedSequences = groupRepeatedSequences([
-            { name: "SD", start: "2", color: "19005190" },
-            { name: "SD 2", start: "3", color: "19005190" },
-            { name: "Crash", start: "4", color: "33554431" },
+            { displayName: "SD", execToken: "Goto", start: "2", color: "19005190" },
+            { displayName: "SD 2", execToken: "Temp|Flash", start: "3", color: "19005190" },
+            { displayName: "Crash", execToken: "Flash", start: "4", color: "33554431" },
         ], "1", 101);
         assert.deepEqual(repeatedSequences.map((sequence) => ({
             color: sequence.color,
-            name: sequence.name,
+            displayName: sequence.displayName,
             sequenceNumber: sequence.sequenceNumber,
-            timestamps: sequence.timestamps,
+            events: sequence.events,
         })), [
             {
                 color: "19005190",
-                name: "1 - SD",
+                displayName: "1 - SD",
                 sequenceNumber: 102,
-                timestamps: ["2", "3"],
+                events: [
+                    { timestamp: "2", execToken: "Goto" },
+                    { timestamp: "3", execToken: "Temp|Flash" },
+                ],
             },
             {
                 color: "33554431",
-                name: "1 - Crash",
+                displayName: "1 - Crash",
                 sequenceNumber: 103,
-                timestamps: ["4"],
+                events: [{ timestamp: "4", execToken: "Flash" }],
             },
         ]);
     });
@@ -59,7 +77,8 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.repeatedSequences.length, 2);
         assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - SD'), true);
         assert.equal(artifacts.macroXml.includes('Store Sequence 101 Cue 1 thru 3'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 102 &quot;1 - SD&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
         assert.equal(artifacts.timecodeXml?.includes('Duration="6.000"'), true);
         const outputFiles = createConversionOutputFiles(artifacts);
         assert.deepEqual(outputFiles.map((file) => file.name), ["songcsv_macro.xml", "songcsv_timecode.xml"]);
@@ -81,8 +100,23 @@ describe("conversion artifacts", () => {
         const { uniqueCues, repeatedMarkers } = splitMarkerRows(normalizeMarkerRows(rows));
         assert.equal(uniqueCues.length, 3);
         assert.equal(repeatedMarkers.length, 3);
-        assert.equal(uniqueCues[0].name, "Intro");
-        assert.equal(repeatedMarkers[0].name, "SD");
+        assert.equal(uniqueCues[0].displayName, "Intro");
+        assert.equal(uniqueCues[0].execToken, "Goto");
+        assert.equal(repeatedMarkers[0].displayName, "SD");
+        assert.equal(repeatedMarkers[1].execToken, "Goto");
+    });
+    it("uses the execution token from a bracket suffix in generated XML", () => {
+        const csv = `#,Name,Start,Color
+1,Intro [Temp|Flash],0,
+2,SD [Flash],1,19005190
+3,SD,2,19005190
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "tokens.csv", baseSettings);
+        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 1 &quot;Intro&quot;'), true);
+        assert.equal(artifacts.timecodeXml?.includes('Name="Temp|Flash"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Temp|Flash"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Flash"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Goto"'), true);
     });
 });
 //# sourceMappingURL=reaper2ma.test.js.map

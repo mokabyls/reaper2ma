@@ -1,7 +1,41 @@
 import * as csv from "@vanillaes/csv";
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
+const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]$/;
+const ALLOWED_EXECUTION_TOKENS = new Set(["Go+", "Go-", "Goto", "Load", "On", "Select", "Top", "Temp", "Flash"]);
 export function sanitizeMarkerName(name) {
     return name.replace(SAFE_MARKER_NAME_PATTERN, "");
+}
+export function parseMarkerExecution(name) {
+    const trimmedName = name.trim();
+    const suffixMatch = trimmedName.match(EXECUTION_SUFFIX_PATTERN);
+    if (!suffixMatch) {
+        return {
+            displayName: sanitizeMarkerName(trimmedName),
+            execToken: "Goto",
+        };
+    }
+    const displayName = sanitizeMarkerName(suffixMatch[1].trim());
+    const execToken = normalizeExecutionToken(suffixMatch[2]);
+    if (!execToken) {
+        return {
+            displayName,
+            execToken: "Goto",
+        };
+    }
+    return {
+        displayName,
+        execToken,
+    };
+}
+function normalizeExecutionToken(token) {
+    const parts = token.split("|").map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0) {
+        return undefined;
+    }
+    if (!parts.every((part) => ALLOWED_EXECUTION_TOKENS.has(part))) {
+        return undefined;
+    }
+    return parts.join("|");
 }
 export function parseReaperMarkerRows(dataString) {
     const parsedLines = csv.parse(dataString);
@@ -25,10 +59,11 @@ export function parseReaperMarkerRows(dataString) {
 export function normalizeMarkerRows(rows) {
     const seenNameCount = {};
     const sanitizedRows = rows.map((row) => {
-        const name = sanitizeMarkerName(row.Name);
-        seenNameCount[name] = (seenNameCount[name] || 0) + 1;
+        const marker = parseMarkerExecution(row.Name);
+        seenNameCount[marker.displayName] = (seenNameCount[marker.displayName] || 0) + 1;
         return {
-            name,
+            displayName: marker.displayName,
+            execToken: marker.execToken,
             start: row.Start,
             color: row.Color,
         };
@@ -38,12 +73,12 @@ export function normalizeMarkerRows(rows) {
         .slice()
         .reverse()
         .map((row) => {
-        const remaining = remainingNames[row.name] ?? 0;
+        const remaining = remainingNames[row.displayName] ?? 0;
         if (remaining > 1) {
-            remainingNames[row.name] = remaining - 1;
+            remainingNames[row.displayName] = remaining - 1;
             return {
                 ...row,
-                name: `${row.name} ${remaining}`,
+                displayName: `${row.displayName} ${remaining}`,
             };
         }
         return row;
@@ -63,13 +98,21 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber) 
     for (const marker of repeatedMarkers) {
         const existing = sequencesByColor.get(marker.color);
         if (existing) {
-            existing.timestamps.push(marker.start);
+            existing.events.push({
+                timestamp: marker.start,
+                execToken: marker.execToken,
+            });
             continue;
         }
         const repeatedSequence = {
             color: marker.color,
-            name: `${prefix} - ${marker.name}`,
-            timestamps: [marker.start],
+            displayName: `${prefix} - ${marker.displayName}`,
+            events: [
+                {
+                    timestamp: marker.start,
+                    execToken: marker.execToken,
+                },
+            ],
             sequenceNumber: nextSequenceNumber++,
         };
         sequencesByColor.set(marker.color, repeatedSequence);

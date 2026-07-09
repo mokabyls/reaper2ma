@@ -22,7 +22,7 @@ function generateGuid() {
         .map((byte) => byte.toString(16).padStart(2, "0").toUpperCase())
         .join(" ");
 }
-function createRealtimeGotoCommand(target, destination, isFirstEvent) {
+function createRealtimeExecutionCommand(execToken, target, destination, isFirstEvent) {
     return {
         "@_Type": "Key",
         "@_Source": "Original",
@@ -39,25 +39,25 @@ function createRealtimeGotoCommand(target, destination, isFirstEvent) {
         "@_IssuedByTimecode": "0",
         "@_FromLocalHardwareFader": "1",
         ...(isFirstEvent ? { "@_Object": target } : {}),
-        "@_ExecToken": "Goto",
+        "@_ExecToken": execToken,
         "@_ValCueDestination": destination,
     };
 }
-function createGotoEventsForCueSequence(sequenceNumber, uniqueCues) {
+function createEventsForCueSequence(sequenceNumber, uniqueCues) {
     return uniqueCues.map((item, index) => ({
-        "@_Name": "Goto",
+        "@_Name": item.execToken,
         "@_Time": item.start,
-        RealtimeCmd: createRealtimeGotoCommand(`ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}`, `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}.${item.name}`, index === 0),
+        RealtimeCmd: createRealtimeExecutionCommand(item.execToken, `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}`, `ShowData.DataPools.Default.Sequences.Sequence ${sequenceNumber}.${item.displayName}`, index === 0),
     }));
 }
-function createGotoEventsForRepeatedSequence(sequenceName, timestamps) {
-    return timestamps.map((timestamp, index) => ({
-        "@_Name": "Goto",
-        "@_Time": timestamp,
-        RealtimeCmd: createRealtimeGotoCommand(`ShowData.DataPools.Default.Sequences.${sequenceName}`, `ShowData.DataPools.Default.Sequences.${sequenceName}.Cue 1`, index === 0),
+function createEventsForRepeatedSequence(sequenceName, events) {
+    return events.map((event, index) => ({
+        "@_Name": event.execToken,
+        "@_Time": event.timestamp,
+        RealtimeCmd: createRealtimeExecutionCommand(event.execToken, `ShowData.DataPools.Default.Sequences.${sequenceName}`, `ShowData.DataPools.Default.Sequences.${sequenceName}.Cue 1`, index === 0),
     }));
 }
-function createRepeatedSequenceTrack(sequenceName, timestamps) {
+function createRepeatedSequenceTrack(sequenceName, events) {
     return {
         "@_Guid": generateGuid(),
         "@_Target": `ShowData.DataPools.Default.Sequences.${sequenceName}`,
@@ -68,9 +68,15 @@ function createRepeatedSequenceTrack(sequenceName, timestamps) {
             "@_Play": "",
             "@_Rec": "",
             CmdSubTrack: {
-                CmdEvent: createGotoEventsForRepeatedSequence(sequenceName, timestamps),
+                CmdEvent: createEventsForRepeatedSequence(sequenceName, events),
             },
         },
+    };
+}
+function createSpeedMasterCommand(sequenceNumber, speedMaster) {
+    return {
+        "@_Command": `Set Sequence ${sequenceNumber} Property "SpeedMaster" #[Master ${speedMaster}]`,
+        "@_Wait": "0.10",
     };
 }
 export function generateMacroXML(settings, uniqueCues, repeatedSequences, filename) {
@@ -86,15 +92,17 @@ export function generateMacroXML(settings, uniqueCues, repeatedSequences, filena
                         "@_Command": `Store Sequence ${settings.sequenceNumber} Cue ${settings.cueStartNumber} thru ${uniqueCues.length + settings.cueStartNumber - 1}`,
                         "@_Wait": "0.10",
                     },
+                    createSpeedMasterCommand(settings.sequenceNumber, settings.speedMaster),
                     ...uniqueCues.map((item, index) => ({
-                        "@_Command": `Label Sequence ${settings.sequenceNumber} Cue ${index + settings.cueStartNumber} "${item.name}"`,
+                        "@_Command": `Label Sequence ${settings.sequenceNumber} Cue ${index + settings.cueStartNumber} "${item.displayName}"`,
                         "@_Wait": "0.10",
                     })),
                     ...repeatedSequences.flatMap((sequence) => [
                         {
-                            "@_Command": `Store Sequence ${sequence.sequenceNumber} "${sequence.name}"`,
+                            "@_Command": `Store Sequence ${sequence.sequenceNumber} "${sequence.displayName}"`,
                             "@_Wait": "0.10",
                         },
+                        createSpeedMasterCommand(sequence.sequenceNumber, settings.speedMaster),
                         {
                             "@_Command": `Store Cue 1 Sequence ${sequence.sequenceNumber} /Merge`,
                             "@_Wait": "0.10",
@@ -156,7 +164,7 @@ export function generateTimecodeXML(settings, uniqueCues, repeatedSequences, fil
                                 "@_Play": "",
                                 "@_Rec": "",
                                 CmdSubTrack: {
-                                    CmdEvent: createGotoEventsForCueSequence(settings.sequenceNumber, uniqueCues),
+                                    CmdEvent: createEventsForCueSequence(settings.sequenceNumber, uniqueCues),
                                 },
                             },
                         },
@@ -168,7 +176,7 @@ export function generateTimecodeXML(settings, uniqueCues, repeatedSequences, fil
                             "@_Name": "Marker",
                             "@_Guid": "00 00 00 00 B1 F5 25 5F 70 04 00 00 28 74 D0 4C",
                         },
-                        Track: repeatedSequences.map((sequence) => createRepeatedSequenceTrack(sequence.name, sequence.timestamps)),
+                        Track: repeatedSequences.map((sequence) => createRepeatedSequenceTrack(sequence.displayName, sequence.events)),
                     },
                 ],
             },

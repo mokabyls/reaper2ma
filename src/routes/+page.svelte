@@ -6,6 +6,7 @@
     let sequenceNumber = 101;
     let driveNumber = 2;
     let cueStartNumber = 1;
+    let speedMaster = "3.4";
     let prefix = "1";
     let exportMode: ExportMode = "cues-and-timecode";
     let isDragOver = false;
@@ -21,6 +22,7 @@
             sequenceNumber,
             driveNumber,
             cueStartNumber,
+            speedMaster,
             prefix,
             exportMode,
         };
@@ -209,6 +211,14 @@
                     <span class="label-hint">e.g. Song Number</span>
                 </label>
                 <input id="prefix" type="text" bind:value={prefix} class="input" />
+            </div>
+
+            <div class="input-group">
+                <label for="speed-master" class="label">
+                    <span class="label-text">Speed Master</span>
+                    <span class="label-hint">Assigned to every created sequence, e.g. 3.4</span>
+                </label>
+                <input id="speed-master" type="text" bind:value={speedMaster} class="input" inputmode="text" />
             </div>
 
             <div class="input-group" class:disabled={exportMode === "cues-only"}>

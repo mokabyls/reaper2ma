@@ -216,7 +216,7 @@
             <div class="input-group">
                 <label for="speed-master" class="label">
                     <span class="label-text">Speed Master</span>
-                    <span class="label-hint">Assigned to every created sequence, e.g. 3.4</span>
+                    <span class="label-hint">Assigned to every created sequence and used by BPM tags, e.g. 3.4</span>
                 </label>
                 <input id="speed-master" type="text" bind:value={speedMaster} class="input" inputmode="text" />
             </div>
@@ -227,6 +227,17 @@
                     <span class="label-hint">Drive to use for import (1-8)</span>
                 </label>
                 <input id="drive-number" type="number" min="1" max="8" step="1" bind:value={driveNumber} class="input" disabled={exportMode === "cues-only"} />
+            </div>
+        </div>
+
+        <div class="syntax-card section-card">
+            <div class="label">
+                <span class="label-text">Marker tags</span>
+                <span class="label-hint">Metadata goes in a leading block, execution goes in a trailing block.</span>
+            </div>
+            <div class="syntax-examples">
+                <code>[BPM_129.5|X_foo] Intro</code>
+                <code>Intro [Temp|Flash]</code>
             </div>
         </div>
 
@@ -602,6 +613,27 @@
 
     .section-card:hover {
         border-color: var(--border-hover);
+    }
+
+    .syntax-card {
+        margin-top: 1.5rem;
+    }
+
+    .syntax-examples {
+        display: grid;
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+    }
+
+    .syntax-examples code {
+        display: block;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        background: var(--step-bg);
+        border: 1px solid var(--border-light);
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        overflow-x: auto;
     }
 
     .section-summary {

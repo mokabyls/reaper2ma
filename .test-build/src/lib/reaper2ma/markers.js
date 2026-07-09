@@ -1,20 +1,91 @@
 import * as csv from "@vanillaes/csv";
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
-const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]$/;
+const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]\s*$/;
 const ALLOWED_EXECUTION_TOKENS = new Set(["Go+", "Go-", "Goto", "Load", "On", "Select", "Top", "Temp", "Flash"]);
+const BPM_VALUE_PATTERN = /^(?:\d+(?:\.\d+)?|\.\d+)$/;
 export function sanitizeMarkerName(name) {
     return name.replace(SAFE_MARKER_NAME_PATTERN, "");
 }
-export function parseMarkerExecution(name) {
+export function parseMarkerName(name) {
     const trimmedName = name.trim();
-    const suffixMatch = trimmedName.match(EXECUTION_SUFFIX_PATTERN);
+    const { remainder, tags } = parseLeadingTagBlocks(trimmedName);
+    const { displayName: rawDisplayName, execToken } = parseExecutionSuffix(remainder);
+    const displayName = sanitizeMarkerName(rawDisplayName.trim());
+    const bpmTag = tags.find((tag) => tag.key === "BPM" && tag.value !== null && isValidBpmValue(tag.value));
+    return {
+        displayName,
+        execToken,
+        tags,
+        ...(bpmTag
+            ? {
+                bpm: Number.parseFloat(bpmTag.value),
+                bpmText: bpmTag.value,
+            }
+            : {}),
+    };
+}
+export function parseMarkerExecution(name) {
+    const parsedMarker = parseMarkerName(name);
+    return {
+        displayName: parsedMarker.displayName,
+        execToken: parsedMarker.execToken,
+    };
+}
+function parseLeadingTagBlocks(name) {
+    const tags = [];
+    let remainder = name;
+    while (remainder.startsWith("[")) {
+        const closingBracketIndex = remainder.indexOf("]");
+        if (closingBracketIndex < 0) {
+            break;
+        }
+        const rawBlock = remainder.slice(1, closingBracketIndex).trim();
+        if (rawBlock.length > 0) {
+            for (const token of rawBlock.split("|")) {
+                const tag = parseMarkerTagToken(token);
+                if (tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        remainder = remainder.slice(closingBracketIndex + 1).trimStart();
+    }
+    return {
+        remainder,
+        tags,
+    };
+}
+function parseMarkerTagToken(token) {
+    const trimmedToken = token.trim();
+    if (!trimmedToken) {
+        return null;
+    }
+    const separatorIndex = trimmedToken.indexOf("_");
+    if (separatorIndex < 0) {
+        return {
+            key: trimmedToken.toUpperCase(),
+            value: null,
+        };
+    }
+    const key = trimmedToken.slice(0, separatorIndex).trim().toUpperCase();
+    const value = trimmedToken.slice(separatorIndex + 1).trim();
+    if (!key) {
+        return null;
+    }
+    return {
+        key,
+        value: value.length > 0 ? value : null,
+    };
+}
+function parseExecutionSuffix(name) {
+    const suffixMatch = name.trim().match(EXECUTION_SUFFIX_PATTERN);
     if (!suffixMatch) {
         return {
-            displayName: sanitizeMarkerName(trimmedName),
+            displayName: name.trim(),
             execToken: "Goto",
         };
     }
-    const displayName = sanitizeMarkerName(suffixMatch[1].trim());
+    const displayName = suffixMatch[1].trim();
     const execToken = normalizeExecutionToken(suffixMatch[2]);
     if (!execToken) {
         return {
@@ -36,6 +107,9 @@ function normalizeExecutionToken(token) {
         return undefined;
     }
     return parts.join("|");
+}
+function isValidBpmValue(value) {
+    return BPM_VALUE_PATTERN.test(value) && Number.parseFloat(value) > 0;
 }
 export function parseReaperMarkerRows(dataString) {
     const parsedLines = csv.parse(dataString);
@@ -59,13 +133,20 @@ export function parseReaperMarkerRows(dataString) {
 export function normalizeMarkerRows(rows) {
     const seenNameCount = {};
     const sanitizedRows = rows.map((row) => {
-        const marker = parseMarkerExecution(row.Name);
+        const marker = parseMarkerName(row.Name);
         seenNameCount[marker.displayName] = (seenNameCount[marker.displayName] || 0) + 1;
         return {
             displayName: marker.displayName,
             execToken: marker.execToken,
+            tags: marker.tags,
             start: row.Start,
             color: row.Color,
+            ...(marker.bpm !== undefined
+                ? {
+                    bpm: marker.bpm,
+                    bpmText: marker.bpmText,
+                }
+                : {}),
         };
     });
     const remainingNames = { ...seenNameCount };

@@ -7,11 +7,19 @@ export type ReaperMarkerRow = {
     Color: string;
 };
 
+export type MarkerTag = {
+    key: string;
+    value: string | null;
+};
+
 export type ConvertedMarker = {
     displayName: string;
     execToken: string;
+    tags: MarkerTag[];
     start: string;
     color: string;
+    bpm?: number;
+    bpmText?: string;
 };
 
 export type RepeatedSequenceEvent = {
@@ -23,6 +31,19 @@ export type RepeatedSequence = {
     color: string;
     displayName: string;
     events: RepeatedSequenceEvent[];
+    sequenceNumber: number;
+};
+
+export type BpmSequenceEvent = {
+    displayName: string;
+    timestamp: string;
+    bpm: number;
+    bpmText: string;
+};
+
+export type BpmSequence = {
+    displayName: string;
+    events: BpmSequenceEvent[];
     sequenceNumber: number;
 };
 
@@ -39,6 +60,7 @@ export type ConversionArtifacts = {
     outputBaseName: string;
     uniqueCues: ConvertedMarker[];
     repeatedSequences: RepeatedSequence[];
+    bpmSequence?: BpmSequence;
     macroXml: string;
     timecodeXml?: string;
 };

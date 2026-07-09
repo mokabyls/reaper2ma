@@ -4,7 +4,17 @@ import type { ConvertedMarker, MarkerTag, ReaperMarkerRow, RepeatedSequence } fr
 
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
 const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]\s*$/;
-const ALLOWED_EXECUTION_TOKENS = new Set(["Go+", "Go-", "Goto", "Load", "On", "Select", "Top", "Temp", "Flash"]);
+const CANONICAL_EXECUTION_TOKENS: Record<string, string> = {
+    "go+": "Go+",
+    "go-": "Go-",
+    goto: "Goto",
+    load: "Load",
+    on: "On",
+    select: "Select",
+    top: "Top",
+    temp: "Temp",
+    flash: "Flash",
+};
 const BPM_VALUE_PATTERN = /^(?:\d+(?:\.\d+)?|\.\d+)$/;
 
 export function sanitizeMarkerName(name: string): string {
@@ -21,10 +31,11 @@ type ParsedMarkerName = {
 
 export function parseMarkerName(name: string): ParsedMarkerName {
     const trimmedName = name.trim();
-    const { remainder, tags } = parseLeadingTagBlocks(trimmedName);
-    const { displayName: rawDisplayName, execToken } = parseExecutionSuffix(remainder);
+    const { remainder, tags, execParts: headExecParts } = parseLeadingTagBlocks(trimmedName);
+    const { displayName: rawDisplayName, execToken: suffixExecToken } = parseExecutionSuffix(remainder);
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
     const bpmTag = tags.find((tag) => tag.key === "BPM" && tag.value !== null && isValidBpmValue(tag.value));
+    const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Goto";
 
     return {
         displayName,
@@ -54,8 +65,10 @@ export function parseMarkerExecution(name: string): {
 function parseLeadingTagBlocks(name: string): {
     remainder: string;
     tags: MarkerTag[];
+    execParts: string[];
 } {
     const tags: MarkerTag[] = [];
+    const execParts: string[] = [];
     let remainder = name;
 
     while (remainder.startsWith("[")) {
@@ -68,13 +81,9 @@ function parseLeadingTagBlocks(name: string): {
         const rawBlock = remainder.slice(1, closingBracketIndex).trim();
 
         if (rawBlock.length > 0) {
-            for (const token of rawBlock.split("|")) {
-                const tag = parseMarkerTagToken(token);
-
-                if (tag) {
-                    tags.push(tag);
-                }
-            }
+            const parsedBlock = parseMarkerBlock(rawBlock);
+            tags.push(...parsedBlock.tags);
+            execParts.push(...parsedBlock.execParts);
         }
 
         remainder = remainder.slice(closingBracketIndex + 1).trimStart();
@@ -83,6 +92,41 @@ function parseLeadingTagBlocks(name: string): {
     return {
         remainder,
         tags,
+        execParts,
+    };
+}
+
+function parseMarkerBlock(block: string): {
+    tags: MarkerTag[];
+    execParts: string[];
+} {
+    const tags: MarkerTag[] = [];
+    const execParts: string[] = [];
+
+    for (const token of block.split("|")) {
+        const parsedToken = token.trim();
+
+        if (!parsedToken) {
+            continue;
+        }
+
+        const execToken = canonicalizeExecutionToken(parsedToken);
+
+        if (execToken) {
+            execParts.push(execToken);
+            continue;
+        }
+
+        const tag = parseMarkerTagToken(parsedToken);
+
+        if (tag) {
+            tags.push(tag);
+        }
+    }
+
+    return {
+        tags,
+        execParts,
     };
 }
 
@@ -117,14 +161,13 @@ function parseMarkerTagToken(token: string): MarkerTag | null {
 
 function parseExecutionSuffix(name: string): {
     displayName: string;
-    execToken: string;
+    execToken?: string;
 } {
     const suffixMatch = name.trim().match(EXECUTION_SUFFIX_PATTERN);
 
     if (!suffixMatch) {
         return {
             displayName: name.trim(),
-            execToken: "Goto",
         };
     }
 
@@ -134,7 +177,6 @@ function parseExecutionSuffix(name: string): {
     if (!execToken) {
         return {
             displayName,
-            execToken: "Goto",
         };
     }
 
@@ -145,17 +187,27 @@ function parseExecutionSuffix(name: string): {
 }
 
 function normalizeExecutionToken(token: string): string | undefined {
-    const parts = token.split("|").map((part) => part.trim()).filter(Boolean);
+    const parts = token.split("|").map((part) => canonicalizeExecutionToken(part));
 
     if (parts.length === 0) {
         return undefined;
     }
 
-    if (!parts.every((part) => ALLOWED_EXECUTION_TOKENS.has(part))) {
+    if (parts.some((part) => !part)) {
         return undefined;
     }
 
     return parts.join("|");
+}
+
+function canonicalizeExecutionToken(token: string): string | undefined {
+    const normalizedToken = token.trim().toLowerCase();
+
+    if (!normalizedToken) {
+        return undefined;
+    }
+
+    return CANONICAL_EXECUTION_TOKENS[normalizedToken];
 }
 
 function isValidBpmValue(value: string): boolean {

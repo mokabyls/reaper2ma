@@ -39,9 +39,19 @@ describe("marker normalization", () => {
     });
 
     it("parses leading metadata tags and trailing execution tokens together", () => {
-        assert.deepEqual(parseMarkerName("[BPM_129.5|X_foo] Intro [Temp|Flash]"), {
+        assert.deepEqual(parseMarkerName("[BPM_129.5|X_foo|Temp] Intro"), {
             displayName: "Intro",
-            execToken: "Temp|Flash",
+            execToken: "Temp",
+            tags: [
+                { key: "BPM", value: "129.5" },
+                { key: "X", value: "foo" },
+            ],
+            bpm: 129.5,
+            bpmText: "129.5",
+        });
+        assert.deepEqual(parseMarkerName("[BPM_129.5|X_foo|Go+] Intro"), {
+            displayName: "Intro",
+            execToken: "Go+",
             tags: [
                 { key: "BPM", value: "129.5" },
                 { key: "X", value: "foo" },
@@ -51,8 +61,13 @@ describe("marker normalization", () => {
         });
         assert.deepEqual(parseMarkerName("[TEMP] Intro"), {
             displayName: "Intro",
-            execToken: "Goto",
-            tags: [{ key: "TEMP", value: null }],
+            execToken: "Temp",
+            tags: [],
+        });
+        assert.deepEqual(parseMarkerName("[TEMP] Intro [Flash]"), {
+            displayName: "Intro",
+            execToken: "Flash",
+            tags: [],
         });
     });
 

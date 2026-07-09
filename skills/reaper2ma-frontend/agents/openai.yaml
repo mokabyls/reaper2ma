@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reaper2MA Frontend"
+  short_description: "Maintain the SvelteKit static frontend"
+  default_prompt: "Use $reaper2ma-frontend to update the SvelteKit UI, static build, or deployment behavior."

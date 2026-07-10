@@ -2,10 +2,10 @@
     import {
         convertReaperCsvToArtifacts,
         createConversionPreview,
-        createReaperTransportMacroOutputFile,
-        createConversionOutputFiles,
-        createExampleMacroPresetOutputFiles,
-        downloadTextFile,
+        createExportBundleFiles,
+        createTimestampedZipFileName,
+        createZipArchiveBlob,
+        downloadBlob,
         exampleMacroPresetGroups,
         parseReaperMarkerRows,
         resolveExampleMacroTimecodeName,
@@ -38,6 +38,7 @@
     let timecodeName = "";
     let exportShowTimeMacros = false;
     let exportTimecodeControlMacros = false;
+    let includeReaperTransportMacros = false;
     let transportOscSlotId = 1;
     let transportOscDataName = "REAPER";
     let transportMacroNamePrefix = "REAPER - ";
@@ -45,10 +46,12 @@
     let isDragOver = false;
     let isProcessing = false;
     let processingStatus = "";
+    let exportStatus = "";
     let processingCompleted = false;
     let selectedFileName = "";
     let selectedFileBaseName = "";
     let resolvedExampleMacroTimecodeName = "";
+    let selectedZipFileNames: string[] = [];
     let conversionSettings: ConversionSettings = {
         sequenceNumber,
         appearanceStartNumber,
@@ -109,6 +112,7 @@
             ? convertReaperCsvToArtifacts(selectedCsvText, selectedFileName, conversionSettings)
             : undefined;
     $: conversionPreview = conversionArtifacts ? createConversionPreview(conversionArtifacts, selectedMarkerCount) : undefined;
+    $: selectedZipFileNames = getSelectedZipFileNames();
 
     const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -124,7 +128,7 @@
             oscSlotId: transportOscSlotId,
             oscDataName: transportOscDataName,
             macroNamePrefix: transportMacroNamePrefix,
-            outputFileName: transportOutputFileName,
+            outputFileName: transportOutputFileName.trim() || "reaper_transport_macros.xml",
         };
     }
 
@@ -148,6 +152,11 @@
         processingCompleted = false;
     }
 
+    function setExportProcessingState(message: string) {
+        isProcessing = true;
+        exportStatus = message;
+    }
+
     async function processFile(file: File) {
         selectedCsvText = "";
         selectedMarkerCount = 0;
@@ -155,6 +164,7 @@
         selectedFileBaseName = "";
         conversionArtifacts = undefined;
         conversionPreview = undefined;
+        exportStatus = "";
         processingCompleted = false;
         setProcessingState("Parsing CSV data...");
 
@@ -179,93 +189,58 @@
         }
     }
 
-    async function exportConversionArtifacts() {
+    function createCurrentExportBundleFiles(includeTransport = includeReaperTransportMacros) {
         if (!conversionArtifacts) {
-            processingStatus = "Upload a CSV file before exporting.";
-            processingCompleted = false;
-            return;
+            return [];
         }
 
-        setProcessingState("Generating macro XML...");
-
-        try {
-            await delay(100);
-
-            for (const outputFile of createConversionOutputFiles(conversionArtifacts)) {
-                downloadTextFile(outputFile.content, outputFile.name);
-            }
-
-            processingStatus = "✅ Macro generated successfully!";
-            processingCompleted = true;
-            isProcessing = false;
-        } catch (error) {
-            processingStatus = "❌ Error processing file";
-            console.error("Error generating conversion artifacts:", error);
-            fileInput.value = "";
-            isProcessing = false;
-        }
-    }
-
-    async function exportExampleMacros() {
-        const files = createExampleMacroPresetOutputFiles({
+        return createExportBundleFiles({
+            conversionArtifacts,
             sourceFileName: selectedFileBaseName,
             timecodeName,
-            selection: getMacroPresetSelection(),
+            macroPresetSelection: getMacroPresetSelection(),
+            includeReaperTransportMacros: includeTransport,
+            transportMacroOptions: getTransportMacroOptions(),
         });
+    }
 
-        if (files.length === 0) {
-            processingStatus = "Select at least one example macro group and provide a timecode name or import a CSV file.";
-            processingCompleted = false;
-            return;
-        }
-
-        setProcessingState("Generating example macro presets...");
-
+    function getSelectedZipFileNames() {
         try {
-            await delay(100);
+            return createCurrentExportBundleFiles().map((file) => file.name);
+        } catch {
+            const fileNames = createCurrentExportBundleFiles(false).map((file) => file.name);
 
-            for (const outputFile of files) {
-                downloadTextFile(outputFile.content, outputFile.name);
+            if (includeReaperTransportMacros) {
+                fileNames.push(transportOutputFileName.trim() || "reaper_transport_macros.xml");
             }
 
-            processingStatus = "✅ Example macros generated successfully!";
-            processingCompleted = true;
-            setTimeout(() => {
-                isProcessing = false;
-                processingStatus = "";
-            }, 500);
-        } catch (error) {
-            processingStatus = "❌ Error generating example macros";
-            console.error("Error generating example macros:", error);
-            setTimeout(() => {
-                isProcessing = false;
-                processingStatus = "";
-            }, 3000);
+            return fileNames;
         }
     }
 
-    async function exportReaperTransportMacros() {
-        setProcessingState("Generating REAPER transport macros...");
+    async function exportSelectedZip() {
+        if (!conversionArtifacts) {
+            exportStatus = "Upload a CSV file before exporting.";
+            return;
+        }
+
+        setExportProcessingState("Generating ZIP archive...");
 
         try {
             await delay(100);
-            const outputFile = createReaperTransportMacroOutputFile(getTransportMacroOptions());
+            const exportedAt = new Date();
+            const outputFiles = createCurrentExportBundleFiles();
+            const zipFileName = createTimestampedZipFileName(conversionArtifacts.outputBaseName, exportedAt);
+            const zipBlob = createZipArchiveBlob(outputFiles, exportedAt);
 
-            downloadTextFile(outputFile.content, outputFile.name);
+            downloadBlob(zipBlob, zipFileName);
 
-            processingStatus = "✅ REAPER transport macros generated successfully!";
-            processingCompleted = true;
-            setTimeout(() => {
-                isProcessing = false;
-                processingStatus = "";
-            }, 500);
+            exportStatus = `✅ ZIP generated: ${zipFileName}`;
+            isProcessing = false;
         } catch (error) {
-            processingStatus = error instanceof Error ? `❌ ${error.message}` : "❌ Error generating REAPER transport macros";
-            console.error("Error generating REAPER transport macros:", error);
-            setTimeout(() => {
-                isProcessing = false;
-                processingStatus = "";
-            }, 3000);
+            exportStatus = error instanceof Error ? `❌ ${error.message}` : "❌ Error generating ZIP archive";
+            console.error("Error generating ZIP archive:", error);
+            isProcessing = false;
         }
     }
 
@@ -323,6 +298,7 @@
         selectedFileBaseName = "";
         processingCompleted = false;
         processingStatus = "";
+        exportStatus = "";
         isProcessing = false;
         activeStep = 1;
         conversionArtifacts = undefined;
@@ -661,7 +637,7 @@
 
                     <div class="summary-block">
                         <div class="summary-block-header">
-                            <h3>Files to download</h3>
+                            <h3>Primary macro file</h3>
                             <span>{conversionPreview.outputFileNames.length} file(s)</span>
                         </div>
                         <div class="chip-list">
@@ -673,7 +649,7 @@
 
                     <div class="wizard-actions">
                         <button type="button" class="secondary-button" on:click={() => (activeStep = 2)}>Back to settings</button>
-                        <button type="button" class="primary-button" on:click={exportConversionArtifacts} disabled={isProcessing}>Generate macro XML</button>
+                        <button type="button" class="primary-button" on:click={() => (activeStep = 4)} disabled={isProcessing}>Continue to Extras</button>
                     </div>
                 {:else}
                     <div class="empty-state">
@@ -727,14 +703,9 @@
                         </div>
                     </div>
 
-                    <button
-                        type="button"
-                        class="macro-export-button"
-                        on:click={exportExampleMacros}
-                        disabled={isProcessing || (!exportShowTimeMacros && !exportTimecodeControlMacros) || !resolvedExampleMacroTimecodeName}
-                    >
-                        Generate selected example macros
-                    </button>
+                    {#if (exportShowTimeMacros || exportTimecodeControlMacros) && !resolvedExampleMacroTimecodeName}
+                        <p class="transport-note">Import a CSV file or provide a timecode name before including example macros.</p>
+                    {/if}
                 </div>
 
                 <div class="section-card macro-presets-card">
@@ -742,6 +713,14 @@
                         <span class="label-text">REAPER transport macros</span>
                         <span class="label-hint">Standalone grandMA3 macro library for OSC transport control.</span>
                     </div>
+
+                    <label class="macro-group-toggle standalone-toggle">
+                        <input type="checkbox" bind:checked={includeReaperTransportMacros} class="macro-checkbox" />
+                        <div>
+                            <div class="macro-group-title">Include REAPER transport macros</div>
+                            <div class="macro-group-description">Adds the OSC transport macro library to the final ZIP.</div>
+                        </div>
+                    </label>
 
                     <div class="input-group">
                         <label for="transport-osc-slot-id" class="label">
@@ -778,9 +757,26 @@
                     <p class="transport-note">
                         <strong>{transportOscDataName}</strong> is display-only. The generated <code>SendOSC</code> commands always use the numeric slot ID.
                     </p>
+                </div>
 
-                    <button type="button" class="macro-export-button" on:click={exportReaperTransportMacros} disabled={isProcessing}>
-                        Generate REAPER transport macros
+                <div class="section-card zip-export-card">
+                    <div class="label">
+                        <span class="label-text">ZIP export</span>
+                        <span class="label-hint">One timestamped archive with the main macro and selected extras.</span>
+                    </div>
+
+                    <div class="chip-list zip-file-list">
+                        {#each selectedZipFileNames as fileName}
+                            <span class="summary-chip file-chip">{fileName}</span>
+                        {/each}
+                    </div>
+
+                    {#if exportStatus}
+                        <p class="status-message export-status" role="status">{exportStatus}</p>
+                    {/if}
+
+                    <button type="button" class="macro-export-button" on:click={exportSelectedZip} disabled={isProcessing || !conversionArtifacts}>
+                        Download ZIP
                     </button>
                 </div>
 
@@ -1489,6 +1485,13 @@
         cursor: pointer;
     }
 
+    .standalone-toggle {
+        padding: 0.85rem 0;
+        border-top: 1px solid var(--border-light);
+        border-bottom: 1px solid var(--border-light);
+        margin: 1rem 0;
+    }
+
     .macro-checkbox {
         width: 18px;
         height: 18px;
@@ -1549,6 +1552,19 @@
         cursor: not-allowed;
         opacity: 0.55;
         box-shadow: none;
+    }
+
+    .zip-export-card {
+        margin-top: 1.5rem;
+    }
+
+    .zip-file-list {
+        margin-top: 0.75rem;
+    }
+
+    .export-status {
+        margin: 1rem 0 0;
+        text-align: left;
     }
 
     .transport-note {

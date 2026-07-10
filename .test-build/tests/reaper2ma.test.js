@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { XMLParser } from "fast-xml-parser";
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
 import { convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
+import { createExportBundleFiles } from "../src/lib/reaper2ma/export-bundle.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
 import { createConversionPreview } from "../src/lib/reaper2ma/preview.js";
@@ -16,6 +17,7 @@ import { delayToTagProvider } from "../src/lib/reaper2ma/providers/delay-to.js";
 import { fadeFromTagProvider } from "../src/lib/reaper2ma/providers/fade-from.js";
 import { fadeToTagProvider } from "../src/lib/reaper2ma/providers/fade-to.js";
 import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseMarkerName, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
+import { createTimestampedZipFileName, createZipArchiveBytes } from "../src/lib/reaper2ma/zip.js";
 const baseSettings = {
     sequenceNumber: 9001,
     appearanceStartNumber: 9001,
@@ -50,6 +52,29 @@ function asArray(value) {
 function getMacroCommands(xml) {
     const parsed = parseXml(xml);
     return asArray(parsed.GMA3.Macro.MacroLine).map((line) => line["@_Command"]);
+}
+function readUint32(bytes, offset) {
+    return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, true);
+}
+function parseZipLocalEntries(bytes) {
+    const decoder = new TextDecoder();
+    const entries = new Map();
+    let offset = 0;
+    while (readUint32(bytes, offset) === 0x04034b50) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset + offset, 30);
+        const compressedSize = view.getUint32(18, true);
+        const fileNameLength = view.getUint16(26, true);
+        const extraLength = view.getUint16(28, true);
+        const fileNameStart = offset + 30;
+        const contentStart = fileNameStart + fileNameLength + extraLength;
+        const fileName = decoder.decode(bytes.slice(fileNameStart, fileNameStart + fileNameLength));
+        const content = decoder.decode(bytes.slice(contentStart, contentStart + compressedSize));
+        entries.set(fileName, content);
+        offset = contentStart + compressedSize;
+    }
+    assert.equal(readUint32(bytes, offset), 0x02014b50);
+    assert.equal(readUint32(bytes, bytes.length - 22), 0x06054b50);
+    return entries;
 }
 describe("marker normalization", () => {
     it("preserves allowed marker characters and removes unsupported ones", () => {
@@ -894,6 +919,74 @@ describe("reaper transport macro library", () => {
         });
         assert.equal(output.name, "custom.xml");
         assert.equal(output.content, generateReaperTransportMacros({ outputFileName: "custom.xml" }));
+    });
+});
+describe("zip export bundle", () => {
+    it("builds timestamped ZIP filenames from the conversion basename", () => {
+        assert.equal(createTimestampedZipFileName("demo", new Date(2026, 6, 10, 15, 4, 6)), "demo_20260710-150406.zip");
+        assert.equal(createTimestampedZipFileName(" ", new Date(2026, 0, 2, 3, 4, 5)), "reaper2ma_20260102-030405.zip");
+    });
+    it("creates a standard ZIP archive containing UTF-8 XML files", () => {
+        const bytes = createZipArchiveBytes([
+            { name: "main.xml", content: "<GMA3>Main</GMA3>" },
+            { name: "accent.xml", content: "<GMA3>Début</GMA3>" },
+        ], new Date(2026, 6, 10, 15, 4, 6));
+        const firstLocalHeader = new DataView(bytes.buffer, bytes.byteOffset, 30);
+        const entries = parseZipLocalEntries(bytes);
+        assert.equal(readUint32(bytes, 0), 0x04034b50);
+        assert.equal(readUint32(bytes, bytes.length - 22), 0x06054b50);
+        assert.equal(firstLocalHeader.getUint16(6, true) & 0x0800, 0x0800);
+        assert.deepEqual([...entries.keys()], ["main.xml", "accent.xml"]);
+        assert.equal(entries.get("main.xml"), "<GMA3>Main</GMA3>");
+        assert.equal(entries.get("accent.xml"), "<GMA3>Début</GMA3>");
+    });
+    it("rejects empty archives and duplicate entry names", () => {
+        assert.throws(() => createZipArchiveBytes([]), /empty ZIP/);
+        assert.throws(() => createZipArchiveBytes([
+            { name: "macro.xml", content: "one" },
+            { name: "macro.xml", content: "two" },
+        ]), /Duplicate ZIP entry name/);
+    });
+    it("builds bundle files from the main macro and selected extras", () => {
+        const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
+        const withoutTransport = createExportBundleFiles({
+            conversionArtifacts: artifacts,
+            sourceFileName: "Song 01",
+            timecodeName: "",
+            macroPresetSelection: {
+                showTime: true,
+                timecodeControl: false,
+            },
+            includeReaperTransportMacros: false,
+        });
+        const withTransport = createExportBundleFiles({
+            conversionArtifacts: artifacts,
+            sourceFileName: "Song 01",
+            timecodeName: "custom-timecode",
+            macroPresetSelection: {
+                showTime: false,
+                timecodeControl: true,
+            },
+            includeReaperTransportMacros: true,
+            transportMacroOptions: {
+                outputFileName: "transport.xml",
+            },
+        });
+        assert.deepEqual(withoutTransport.map((file) => file.name), [
+            "songcsv_macro.xml",
+            "show-time-manuel.xml",
+            "show-time-auto-restore.xml",
+        ]);
+        assert.deepEqual(withTransport.map((file) => file.name), [
+            "songcsv_macro.xml",
+            "timecode-switch-int.xml",
+            "timecode-switch-ltc.xml",
+            "timecode-rewind-and-switch-int.xml",
+            "timecode-rewind-tc-and-switch-ltc.xml",
+            "transport.xml",
+        ]);
+        assert.equal(withoutTransport.some((file) => file.name === "transport.xml"), false);
+        assert.equal(withTransport.at(-1)?.content.includes('Macro Name="REAPER - PLAY"'), true);
     });
 });
 //# sourceMappingURL=reaper2ma.test.js.map

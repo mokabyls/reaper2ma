@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 macro XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds one grandMA3 macro XML file with `fast-xml-parser`. In `cues-and-timecode` mode, that macro creates the timecode, tracks, events, and cue assignments by grandMA commands instead of exporting a separate `GMA3.Timecode` XML object.
+This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 macro XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds one grandMA3 macro XML file with `fast-xml-parser`. In `cues-and-timecode` mode, that macro creates the timecode, tracks, events, and cue assignments by grandMA commands instead of exporting a separate `GMA3.Timecode` XML object. Downloads are delivered as one timestamped ZIP archive that contains the main macro XML plus selected extra macro XML files.
 
 The core product logic now lives in `src/lib/reaper2ma/*` rather than the page component. There is a conversion library, XML generation helpers, and automated fixture tests. After installing locked dependencies with `pnpm install --frozen-lockfile`, both `pnpm check` and `pnpm build` pass.
 
@@ -109,9 +109,11 @@ The page has one primary workflow:
 11. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
 12. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; if no release is found, the generator inserts a tiny fallback release just after the start.
 13. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-14. Macro XML is always generated and downloaded as a single file.
+14. Macro XML is always generated and included in the final ZIP archive.
 15. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
-16. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
+16. The Summary step is review-only and sends the user to Extras before download.
+17. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
+18. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
 
 The default settings are:
 
@@ -125,10 +127,12 @@ The default settings are:
 - `importMode = "markers-only"`
 - `exportMode = "cues-and-timecode"`
 
-The two export modes are:
+The two export modes affect the main macro XML inside the timestamped ZIP:
 
-- `cues-and-timecode` - Downloads `<filename>_macro.xml`; macro creates sequences, cues, appearances, page assignments, the timecode object, tracks, command events, and cue-to-event assignments.
-- `cues-only` - Downloads `<filename>_macro.xml`; macro creates sequences, cues, appearances, and page assignments but omits timecode commands.
+- `cues-and-timecode` - ZIP contains `<filename>_macro.xml`; macro creates sequences, cues, appearances, page assignments, the timecode object, tracks, command events, and cue-to-event assignments.
+- `cues-only` - ZIP contains `<filename>_macro.xml`; macro creates sequences, cues, appearances, and page assignments but omits timecode commands.
+
+The ZIP filename is `<filename>_<YYYYMMDD-HHmmss>.zip`, uses uncompressed ZIP entries, and stores all XML files at the archive root.
 
 ## CSV input expectations
 

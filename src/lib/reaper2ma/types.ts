@@ -1,15 +1,28 @@
 export type ExportMode = "cues-and-timecode" | "cues-only";
+export type ImportMode = "markers-only" | "regions-and-markers";
 
 export type ReaperMarkerRow = {
     "#": string;
     Name: string;
     Start: string;
+    End?: string;
+    Length?: string;
     Color: string;
+};
+
+export type ReaperRegionRow = ReaperMarkerRow & {
+    End: string;
+    Length: string;
 };
 
 export type MarkerTag = {
     key: string;
     value: string | null;
+};
+
+export type RegionActionTag = {
+    kind: "ON" | "OFF";
+    regionId: string;
 };
 
 export type CueTimingTagKey =
@@ -31,12 +44,21 @@ export type CueTimingTag = {
     value: string;
 };
 
+export type AppearanceReference = {
+    appearanceName: string;
+    appearanceNumber: number;
+    appearanceColor: string;
+};
+
 export type ConvertedMarker = {
     displayName: string;
     execToken: string;
     tags: MarkerTag[];
+    regionActions?: RegionActionTag[];
     start: string;
     color: string;
+    regionId?: string;
+    regionLabel?: string;
     bpm?: number;
     bpmText?: string;
     cueFade?: string;
@@ -46,6 +68,10 @@ export type ConvertedMarker = {
 export type SequenceCue = {
     cueNumber: number;
     name: string;
+    appearanceName?: string;
+    appearanceNumber?: number;
+    appearanceColor?: string;
+    commands?: string[];
     cueFade?: string;
     cueTiming?: CueTimingTag[];
 };
@@ -55,6 +81,7 @@ export type SequenceTrigger = {
     execToken: string;
     cueNumber: number;
     cueName: string;
+    regionActions?: RegionActionTag[];
     cueFade?: string;
     cueTiming?: CueTimingTag[];
 };
@@ -66,6 +93,22 @@ export type RepeatedSequence = {
     events: SequenceTrigger[];
     appearanceName: string;
     appearanceNumber: number;
+    appearanceColor: string;
+    sequenceNumber: number;
+};
+
+export type RegionSequence = {
+    regionId: string;
+    displayName: string;
+    regionLabel: string;
+    start: string;
+    end: string;
+    color: string;
+    cues: SequenceCue[];
+    events: SequenceTrigger[];
+    appearanceName?: string;
+    appearanceNumber?: number;
+    appearanceColor?: string;
     sequenceNumber: number;
 };
 
@@ -91,6 +134,7 @@ export type BpmSequence = {
 };
 
 export type ConversionSettings = {
+    importMode?: ImportMode;
     sequenceNumber: number;
     appearanceStartNumber: number;
     driveNumber: number;
@@ -142,7 +186,9 @@ export type ExampleMacroPresetOutputFile = {
 };
 
 export type ConversionArtifacts = {
+    importMode: ImportMode;
     outputBaseName: string;
+    regionSequences: RegionSequence[];
     uniqueCues: ConvertedMarker[];
     repeatedSequences: RepeatedSequence[];
     bumpSequences: BumpSequence[];

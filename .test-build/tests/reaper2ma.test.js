@@ -6,6 +6,7 @@ import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src
 import { convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
+import { createConversionPreview } from "../src/lib/reaper2ma/preview.js";
 import { createReaperTransportMacroOutputFile, generateReaperTransportMacros } from "../src/lib/reaper2ma/transport-macros.js";
 import { bpmTagProvider } from "../src/lib/reaper2ma/providers/bpm.js";
 import { cueFadeTagProvider } from "../src/lib/reaper2ma/providers/cue-fade.js";
@@ -25,6 +26,7 @@ const baseSettings = {
     exportMode: "cues-and-timecode",
 };
 const fixtureCsv = readFileSync(new URL("../../tests/fixtures/basic.csv", import.meta.url), "utf8");
+const regionFixtureCsv = readFileSync(new URL("../../demo/test-billy-markers-without-mp3_regions_markers.csv", import.meta.url), "utf8");
 const transportMacroFixture = readFileSync(new URL("../../tests/fixtures/reaper-transport-macros.default.xml", import.meta.url), "utf8");
 const xmlParser = new XMLParser({
     ignoreAttributes: false,
@@ -175,6 +177,7 @@ describe("marker normalization", () => {
             cues: sequence.cues,
             appearanceName: sequence.appearanceName,
             appearanceNumber: sequence.appearanceNumber,
+            appearanceColor: sequence.appearanceColor,
             sequenceNumber: sequence.sequenceNumber,
             events: sequence.events,
         })), [
@@ -187,6 +190,7 @@ describe("marker normalization", () => {
                 ],
                 appearanceName: "R2MA Color 19005190",
                 appearanceNumber: 1,
+                appearanceColor: "19005190",
                 sequenceNumber: 102,
                 events: [
                     { timestamp: "2", execToken: "Goto", cueNumber: 1, cueName: "Start" },
@@ -199,6 +203,7 @@ describe("marker normalization", () => {
                 cues: [{ cueNumber: 1, name: "Start" }],
                 appearanceName: "R2MA Color 33554431",
                 appearanceNumber: 2,
+                appearanceColor: "33554431",
                 sequenceNumber: 103,
                 events: [{ timestamp: "4", execToken: "Goto", cueNumber: 1, cueName: "Start" }],
             },
@@ -266,13 +271,104 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.macroXml.includes('Command="Label Sequence 102 Cue 1 &quot;Start&quot;"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Label Sequence 103 Cue 1 &quot;Start&quot;"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.Sequence 101.Intro 2'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - SD.Start'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - Harry Potter Deb.Start'), true);
         assert.equal(artifacts.macroXml.includes('Store Sequence 101 Cue 1 thru 3'), true);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
         assert.equal(artifacts.timecodeXml?.includes('Duration="6.000"'), true);
         const outputFiles = createConversionOutputFiles(artifacts);
         assert.deepEqual(outputFiles.map((file) => file.name), ["songcsv_macro.xml", "songcsv_timecode.xml"]);
+    });
+    it("builds a conversion preview from derived artifacts", () => {
+        const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
+        const preview = createConversionPreview(artifacts, 6);
+        assert.deepEqual(preview.outputFileNames, ["songcsv_macro.xml", "songcsv_timecode.xml"]);
+        assert.equal(preview.sourceMarkerCount, 6);
+        assert.equal(preview.uniqueCueCount, 3);
+        assert.equal(preview.repeatedSequenceCount, 2);
+        assert.equal(preview.bumpSequenceCount, 0);
+        assert.equal(preview.bpmEventCount, 0);
+        assert.equal(preview.duration, "6.000");
+        assert.deepEqual(preview.generatedSequenceNames, ["1 - SD", "1 - Crash"]);
+        assert.equal(preview.warnings.length, 0);
+    });
+    it("builds hybrid region artifacts from the demo CSV fixture", () => {
+        const artifacts = convertReaperCsvToArtifacts(regionFixtureCsv, "test-billy-markers-without-mp3_regions_markers.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        assert.equal(artifacts.regionSequences.length, 2);
+        assert.deepEqual(artifacts.regionSequences.map((sequence) => ({
+            regionId: sequence.regionId,
+            sequenceNumber: sequence.sequenceNumber,
+            cues: sequence.cues.map((cue) => cue.name),
+        })), [
+            { regionId: "R1", sequenceNumber: 102, cues: ["Introduction"] },
+            {
+                regionId: "R2",
+                sequenceNumber: 103,
+                cues: ["Dbut Billy", "Billy A Cet Age", "Blanc", "Intro Musique", "Monte", "Fin monte"],
+            },
+        ]);
+        assert.equal(artifacts.repeatedSequences.length, 1);
+        assert.equal(artifacts.repeatedSequences[0].displayName, "1 - Harry Potter Deb");
+        assert.equal(artifacts.bumpSequences.length, 0);
+        assert.equal(artifacts.bpmSequence?.sequenceNumber, 105);
+        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 102 &quot;R1&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 103 &quot;R2&quot;"'), true);
+        assert.equal(artifacts.timecodeXml?.includes("ShowData.DataPools.Default.Sequences.R1.Introduction"), true);
+        assert.equal(artifacts.timecodeXml?.includes("ShowData.DataPools.Default.Sequences.R2.Début Billy"), true);
+    });
+    it("falls back to Cue 1 for an unlabeled marker inside a region", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,10,10,
+1,,1,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "blank-cue.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        assert.equal(artifacts.regionSequences.length, 1);
+        assert.equal(artifacts.regionSequences[0].cues[0].name, "Cue 1");
+        assert.equal(artifacts.macroXml.includes('Command="Label Sequence 102 Cue 1 &quot;Cue 1&quot;"'), true);
+    });
+    it("assigns sequence and cue appearances independently in hybrid mode", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,10,10,123456
+1,Marker A,1,,,
+2,Marker B,2,,,654321
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "appearance-region.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        assert.equal(artifacts.regionSequences[0].appearanceName, "R2MA Color 123456");
+        assert.equal(artifacts.regionSequences[0].cues[1].appearanceName, "R2MA Color 654321");
+        assert.equal(artifacts.regionSequences[0].cues[1].appearanceColor, "3.5,98.4,94.5,100.0");
+        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 123456&quot; at Sequence 102"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 654321&quot; at Sequence 102 Cue 2"'), true);
+    });
+    it("emits OFF before ON for compact region action tags", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region One,0,5,5,
+R2,Region Two,5,10,5,
+1,[OFF_R1|ON_R2] Cue,1,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "region-actions.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Off"'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Goto|Go+"'), true);
+        assert.ok((artifacts.timecodeXml ?? "").indexOf('ExecToken="Off"') < (artifacts.timecodeXml ?? "").indexOf('ExecToken="Goto|Go+"'));
+        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.R1'), true);
+        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.R2.Cue 1'), true);
+    });
+    it("ignores region rows in markers-only mode", () => {
+        const artifacts = convertReaperCsvToArtifacts(regionFixtureCsv, "test-billy-markers-without-mp3_regions_markers.csv", baseSettings);
+        assert.equal(artifacts.regionSequences.length, 0);
+        assert.equal(artifacts.uniqueCues.length, 4);
+        assert.equal(artifacts.repeatedSequences.length, 2);
     });
     it("creates standalone example macro exports by group with a CSV filename fallback", () => {
         const outputFiles = createExampleMacroPresetOutputFiles({
@@ -363,9 +459,10 @@ describe("conversion artifacts", () => {
         assert.deepEqual(artifacts.repeatedSequences.map((sequence) => ({
             appearanceName: sequence.appearanceName,
             appearanceNumber: sequence.appearanceNumber,
+            appearanceColor: sequence.appearanceColor,
         })), [
-            { appearanceName: "R2MA Color 19005190", appearanceNumber: 50 },
-            { appearanceName: "R2MA Color 33554431", appearanceNumber: 51 },
+            { appearanceName: "R2MA Color 19005190", appearanceNumber: 50, appearanceColor: "12.9,100.0,2.4,100.0" },
+            { appearanceName: "R2MA Color 33554431", appearanceNumber: 51, appearanceColor: "100.0,100.0,100.0,100.0" },
         ]);
         assert.equal(artifacts.macroXml.includes('Command="Store Appearance 50"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Label Appearance 50 &quot;R2MA Color 19005190&quot;"'), true);
@@ -463,6 +560,15 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.macroXml.includes('Command="Store Sequence 104 &quot;1 - Intro - BUMP - HIT&quot;"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Store Sequence 105 &quot;1 - Verse - BUMP - HIT&quot;"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - Intro - BUMP - HIT.Start'), true);
+    });
+    it("warns when the main sequence is empty", () => {
+        const csv = `#,Name,Start,Color
+1,SD,0,19005190
+2,Crash,1,33554431
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "warning.csv", baseSettings);
+        const preview = createConversionPreview(artifacts, 2);
+        assert.equal(preview.warnings.some((warning) => warning.includes("séquence principale")), true);
     });
 });
 describe("reaper transport macro library", () => {

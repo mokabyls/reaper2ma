@@ -22,12 +22,18 @@ export function parseMarkerName(name) {
     const { remainder, tags, execParts: headExecParts } = parseLeadingTagBlocks(trimmedName);
     const { displayName: rawDisplayName, execToken: suffixExecToken } = parseExecutionSuffix(remainder);
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
-    const markerMetadata = markerTagProviderRegistry.enrich(tags);
+    const regionActions = extractRegionActions(tags);
+    const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag)));
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Goto";
     return {
         displayName,
         execToken,
         tags,
+        ...(regionActions.length > 0
+            ? {
+                regionActions,
+            }
+            : {}),
         ...(markerMetadata.cueTiming.length > 0
             ? {
                 cueTiming: markerMetadata.cueTiming,
@@ -68,6 +74,8 @@ export function parseReaperMarkerRows(dataString) {
             "#": obj["#"] ?? "",
             Name: obj.Name ?? "",
             Start: obj.Start ?? "",
+            End: obj.End ?? "",
+            Length: obj.Length ?? "",
             Color: obj.Color ?? "",
         };
     });
@@ -75,10 +83,16 @@ export function parseReaperMarkerRows(dataString) {
 export function normalizeMarkerRows(rows) {
     return rows.map((row) => {
         const marker = parseMarkerName(row.Name);
+        const markerTags = marker.tags.filter((tag) => !isRegionActionTag(tag));
         return {
             displayName: marker.displayName,
             execToken: marker.execToken,
-            tags: marker.tags,
+            tags: markerTags,
+            ...(marker.regionActions && marker.regionActions.length > 0
+                ? {
+                    regionActions: marker.regionActions,
+                }
+                : {}),
             start: row.Start,
             color: row.Color,
             ...(marker.cueTiming !== undefined
@@ -99,6 +113,9 @@ export function normalizeMarkerRows(rows) {
                 : {}),
         };
     });
+}
+export function isRegionRow(row) {
+    return Boolean(row.End?.trim()) || Boolean(row.Length?.trim());
 }
 function parseLeadingTagBlocks(name) {
     const tags = [];
@@ -203,5 +220,26 @@ function canonicalizeExecutionToken(token) {
         return undefined;
     }
     return CANONICAL_EXECUTION_TOKENS[normalizedToken];
+}
+function isRegionActionTag(tag) {
+    const key = tag.key.trim().toUpperCase();
+    return key === "ON" || key === "OFF";
+}
+function extractRegionActions(tags) {
+    return tags.flatMap((tag) => {
+        if (!isRegionActionTag(tag) || !tag.value) {
+            return [];
+        }
+        const regionId = tag.value.trim().toUpperCase();
+        if (!/^R\d+$/.test(regionId)) {
+            return [];
+        }
+        return [
+            {
+                kind: tag.key.trim().toUpperCase(),
+                regionId,
+            },
+        ];
+    });
 }
 //# sourceMappingURL=marker-parser.js.map

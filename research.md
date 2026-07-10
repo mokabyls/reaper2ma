@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds grandMA3 macro/timecode XML with `fast-xml-parser` and immediately downloads one or two XML files.
+This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds grandMA3 macro/timecode XML with `fast-xml-parser` and immediately downloads one or two XML files.
 
 The core product logic now lives in `src/lib/reaper2ma/*` rather than the page component. There is a conversion library, XML generation helpers, and automated fixture tests. After installing locked dependencies with `pnpm install --frozen-lockfile`, both `pnpm check` and `pnpm build` pass.
 
@@ -11,6 +11,7 @@ The most important project-specific details for future agents are:
 - Reaper CSV rows are expected to have `#`, `Name`, `Start`, and `Color` headers.
 - Empty `Color` means a normal cue in the main sequence.
 - Non-empty `Color` means an effect/repeated sequence; all rows sharing the same color become one grandMA3 sequence with one cue triggered multiple times.
+- In hybrid mode, rows with `End` or `Length` define regions; markers inside the innermost containing region become cues in the region sequence.
 - The exported `Start` value is used directly as seconds; the UI tells users to set Reaper's ruler time unit to seconds.
 - The app is statically deployed under `/reaper2ma` outside development.
 - CI currently uses `yarn`, while the repo contains a `pnpm-lock.yaml` and README instructions use `pnpm`.
@@ -99,13 +100,15 @@ The page has one primary workflow:
 3. The original file name is normalized for output names.
 4. CSV rows are parsed into objects by header.
 5. Marker names are sanitized, duplicate names are suffixed, and optional bracket tags are parsed.
-6. Rows with empty color become `uniqueCues`.
-7. Rows with non-empty color are grouped by exact color into `repeatedSequences`.
-8. Markers with `Temp` or `Flash` execution tokens become bump overlays grouped by color and cue name.
-9. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-10. Macro XML is always generated and downloaded.
-11. Timecode XML is generated and downloaded only in `cues-and-timecode` mode.
-12. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
+6. In markers-only mode, rows with empty color become `uniqueCues`.
+7. In markers-only mode, rows with non-empty color are grouped by exact color into `repeatedSequences`.
+8. In hybrid mode, rows with `End` or `Length` define regions. Markers are attached to the most nested containing region.
+9. In hybrid mode, markers inside regions become cues in the region sequence. Region color creates the sequence appearance and marker color creates the cue appearance.
+10. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
+11. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+12. Macro XML is always generated and downloaded.
+13. Timecode XML is generated and downloaded only in `cues-and-timecode` mode.
+14. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
 
 The default settings are:
 
@@ -113,6 +116,7 @@ The default settings are:
 - `driveNumber = 2`
 - `cueStartNumber = 1`
 - `prefix = "1"`
+- `importMode = "markers-only"`
 - `exportMode = "cues-and-timecode"`
 
 The two export modes are:
@@ -129,7 +133,7 @@ The parser expects a Reaper marker CSV with these headers:
 - `Start`
 - `Color`
 
-The code does not explicitly validate the header row. Missing headers will usually fail during processing and show a generic error. `Start` values are treated as already-compatible grandMA3 seconds strings. There is no beat/timecode/frame conversion. The in-app instructions tell users to set Reaper's time unit to seconds before exporting.
+The code does not explicitly validate the header row. Missing headers will usually fail during processing and show a generic error. `Start` values are treated as already-compatible grandMA3 seconds strings. `End` and `Length` are only used in hybrid mode to describe regions. There is no beat/timecode/frame conversion. The in-app instructions tell users to set Reaper's time unit to seconds before exporting.
 
 File naming is intentionally aggressive:
 
@@ -161,6 +165,7 @@ Bracket tags are parsed from leading or trailing `[]` blocks:
 - Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, and `Flash`.
 - Cue timing tags are emitted on the generated macro line as `Set Sequence ... Cue "..." Part 0.1 ...`.
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
+- Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to `Goto|Go+` on the target region sequence cue 1. `OFF` maps to `Off Sequence` on the target region sequence. If both are present, `OFF` is emitted before `ON`.
 
 ## Unique cue behavior
 
@@ -172,6 +177,7 @@ Macro XML for unique cues:
 - Labels each cue in order: `Label Sequence {sequenceNumber} Cue {cueNumber} "{name}"`.
 - If present, `CueFade` and cue timing tags are applied after the cue is labeled.
 - Cue numbers start at `cueStartNumber`.
+- A marker without a label gets a fallback cue name like `Cue 1`.
 
 Timecode XML for unique cues:
 
@@ -196,6 +202,7 @@ Grouping rules:
 - Repeated sequence numbers start at `sequenceNumber + 1` and increment by first-seen color group.
 - Each repeated sequence has a cue stack with `Start` as cue 1 and later cue names created on demand per color group.
 - If a cue name already exists in that repeated sequence, the cue is reused instead of duplicated.
+- In hybrid mode, region sequences consume the sequence numbers immediately after the main sequence, before repeated, bump, and BPM sequences.
 
 Macro XML for repeated sequences:
 
@@ -204,6 +211,7 @@ Macro XML for repeated sequences:
 - Sets the OffCue trigger type to `Follow`.
 - Assigns a grandMA3 appearance per distinct Reaper color.
 - Applies `CueFade` and cue timing tags to the created cues when present.
+- Region sequences use the same appearance flow when the region row has a color, and region cues can get their own cue-level appearance when the marker color differs from the region color.
 
 Timecode XML for repeated sequences:
 
@@ -243,8 +251,10 @@ Macro specifics:
 - Macro GUID is currently hardcoded.
 - Every macro line waits `0.10`.
 - Every created sequence gets the configured Speed Master assignment.
+- In hybrid mode, region sequences are stored like regular sequences and their marker cues get labeled, timed, and optionally assigned appearances.
 - In `cues-and-timecode` mode, the macro runs `Drive {driveNumber}` and `import Timecode "{filename}_timecode"`.
 - Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} "Color" "r,g,b,a"`, then `Assign Appearance "{name}" at Sequence {sequenceNumber}`.
+- Cue-level appearances use `Assign Appearance "{name}" at Sequence {sequenceNumber} Cue {cueNumber}`.
 - BPM markers create a dedicated sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`.
 
 Timecode specifics:
@@ -258,6 +268,7 @@ Timecode specifics:
 - SwitchOff is `Keep Playbacks`.
 - Timedisplayformat is `<10d11h23m45>`.
 - FrameReadout is `<Seconds>`.
+- Hybrid exports create a dedicated region track group ahead of the repeated and bump groups.
 - BPM markers create a dedicated BPM track in the timecode export.
 - Bump overlays get their own track group separate from music sequences.
 
@@ -286,9 +297,9 @@ The UI is a single page with:
 
 - Header/title and subtitle.
 - Upload/drop zone.
-- Settings grid for sequence number, prefix, and drive number.
+- Settings grid for sequence number, prefix, import mode, and drive number.
 - Collapsible advanced section for cue start number.
-- Radio group for export mode.
+- Radio group for import mode and export mode.
 - Static instructions.
 - Footer with upstream source link and copyright.
 

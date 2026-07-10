@@ -1,5 +1,6 @@
 import type {
     BumpSequence,
+    AppearanceReference,
     ConvertedMarker,
     CueTimingTag,
     RepeatedSequence,
@@ -30,6 +31,7 @@ export function groupRepeatedSequences(
     prefix: string,
     sequenceNumber: number,
     appearanceStartNumber: number,
+    resolveAppearance?: (color: string) => AppearanceReference | undefined,
 ): RepeatedSequence[] {
     const repeatedSequences: RepeatedSequence[] = [];
     const sequencesByColor = new Map<
@@ -54,6 +56,11 @@ export function groupRepeatedSequences(
                 execToken: marker.execToken,
                 cueNumber,
                 cueName: resolveCueName(existing.sequence.cues, cueNumber),
+                ...(marker.regionActions?.length
+                    ? {
+                          regionActions: marker.regionActions,
+                      }
+                    : {}),
                 ...(marker.cueFade !== undefined
                     ? {
                           cueFade: marker.cueFade,
@@ -93,6 +100,11 @@ export function groupRepeatedSequences(
                     execToken: marker.execToken,
                     cueNumber: 1,
                     cueName: START_CUE_NAME,
+                    ...(marker.regionActions?.length
+                        ? {
+                              regionActions: marker.regionActions,
+                          }
+                    : {}),
                     ...(marker.cueFade !== undefined
                         ? {
                               cueFade: marker.cueFade,
@@ -107,8 +119,17 @@ export function groupRepeatedSequences(
             ],
             appearanceName: createAppearanceNameFromReaperColor(marker.color),
             appearanceNumber: nextAppearanceNumber++,
+            appearanceColor: marker.color,
             sequenceNumber: nextSequenceNumber++,
         };
+
+        const appearanceReference = resolveAppearance?.(marker.color);
+
+        if (appearanceReference) {
+            repeatedSequence.appearanceName = appearanceReference.appearanceName;
+            repeatedSequence.appearanceNumber = appearanceReference.appearanceNumber;
+            repeatedSequence.appearanceColor = appearanceReference.appearanceColor;
+        }
 
         existing = {
             sequence: repeatedSequence,
@@ -152,6 +173,11 @@ export function groupBumpSequences(
                 execToken: marker.execToken,
                 cueNumber: 1,
                 cueName: START_CUE_NAME,
+                ...(marker.regionActions?.length
+                    ? {
+                          regionActions: marker.regionActions,
+                      }
+                    : {}),
                 ...(marker.cueFade !== undefined
                     ? {
                           cueFade: marker.cueFade,
@@ -192,6 +218,11 @@ export function groupBumpSequences(
                     execToken: marker.execToken,
                     cueNumber: 1,
                     cueName: START_CUE_NAME,
+                    ...(marker.regionActions?.length
+                        ? {
+                              regionActions: marker.regionActions,
+                          }
+                        : {}),
                     ...(marker.cueFade !== undefined
                         ? {
                               cueFade: marker.cueFade,

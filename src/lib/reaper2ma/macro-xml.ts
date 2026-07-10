@@ -1,7 +1,6 @@
-import { convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
 import { createUniqueCuePlan } from "./cue-plan.js";
 import { XML_HEADER, xmlBuilder } from "./xml-common.js";
-import type { BpmSequence, BumpSequence, ConversionSettings, ConvertedMarker, CueTimingTag, RepeatedSequence, SequenceCue } from "./types.js";
+import type { BpmSequence, BumpSequence, ConversionSettings, ConvertedMarker, CueTimingTag, RegionSequence, RepeatedSequence, SequenceCue } from "./types.js";
 
 function createSpeedMasterCommand(sequenceNumber: number, speedMaster: string): Record<string, string> {
     return {
@@ -10,38 +9,42 @@ function createSpeedMasterCommand(sequenceNumber: number, speedMaster: string): 
     };
 }
 
-function createAppearanceCommands(sequence: RepeatedSequence): Record<string, string>[] {
-    const appearanceColor = convertReaperColorToGrandmaAppearanceColor(sequence.color);
-
-    if (!appearanceColor) {
-        return [];
-    }
-
-    return [
-        {
-            "@_Command": `Store Appearance ${sequence.appearanceNumber}`,
-            "@_Wait": "0.10",
-        },
-        {
-            "@_Command": `Label Appearance ${sequence.appearanceNumber} "${sequence.appearanceName}"`,
-            "@_Wait": "0.10",
-        },
-        {
-            "@_Command": `Set Appearance ${sequence.appearanceNumber} "Color" "${appearanceColor}"`,
-            "@_Wait": "0.10",
-        },
-        {
-            "@_Command": `Assign Appearance "${sequence.appearanceName}" at Sequence ${sequence.sequenceNumber}`,
-            "@_Wait": "0.10",
-        },
-    ];
-}
-
 function createCueLabelCommands(sequenceNumber: number, cues: SequenceCue[]): Record<string, string>[] {
     return cues.map((cue) => ({
         "@_Command": `Label Sequence ${sequenceNumber} Cue ${cue.cueNumber} "${cue.name}"`,
         "@_Wait": "0.10",
     }));
+}
+
+function createSequenceAppearanceAssignmentCommands(
+    sequenceNumber: number,
+    appearanceName?: string,
+    appearanceNumber?: number,
+    appearanceColor?: string,
+): Record<string, string>[] {
+    if (!appearanceName || appearanceNumber === undefined || !appearanceColor) {
+        return [];
+    }
+
+    return [
+        {
+            "@_Command": `Assign Appearance "${appearanceName}" at Sequence ${sequenceNumber}`,
+            "@_Wait": "0.10",
+        },
+    ];
+}
+
+function createCueAppearanceAssignmentCommands(sequenceNumber: number, cues: SequenceCue[]): Record<string, string>[] {
+    return cues.flatMap((cue) =>
+        cue.appearanceName && cue.appearanceNumber !== undefined && cue.appearanceColor
+            ? [
+                  {
+                      "@_Command": `Assign Appearance "${cue.appearanceName}" at Sequence ${sequenceNumber} Cue ${cue.cueNumber}`,
+                      "@_Wait": "0.10",
+                  },
+              ]
+            : [],
+    );
 }
 
 type CueFadeCommandSource = {
@@ -104,7 +107,7 @@ function createColorSequenceMacroLines(sequence: RepeatedSequence, speedMaster: 
             "@_Wait": "0.10",
         },
         createSpeedMasterCommand(sequence.sequenceNumber, speedMaster),
-        ...createAppearanceCommands(sequence),
+        ...createSequenceAppearanceAssignmentCommands(sequence.sequenceNumber, sequence.appearanceName, sequence.appearanceNumber, sequence.appearanceColor),
         {
             "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length}`,
             "@_Wait": "0.10",
@@ -114,6 +117,7 @@ function createColorSequenceMacroLines(sequence: RepeatedSequence, speedMaster: 
             "@_Wait": "0.10",
         },
         ...createCueLabelCommands(sequence.sequenceNumber, sequence.cues),
+        ...createCueAppearanceAssignmentCommands(sequence.sequenceNumber, sequence.cues),
         ...createCueFadeCommands(sequence.sequenceNumber, sequence.cues),
         ...createCueTimingCommands(sequence.sequenceNumber, sequence.cues),
         {
@@ -139,6 +143,33 @@ function createBumpSequenceMacroLines(sequence: BumpSequence, speedMaster: strin
             "@_Wait": "0.10",
         },
         ...createCueLabelCommands(sequence.sequenceNumber, sequence.cues),
+        ...createCueFadeCommands(sequence.sequenceNumber, sequence.cues),
+        ...createCueTimingCommands(sequence.sequenceNumber, sequence.cues),
+        {
+            "@_Command": `Set Sequence ${sequence.sequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`,
+            "@_Wait": "0.10",
+        },
+    ];
+}
+
+function createRegionSequenceMacroLines(sequence: RegionSequence, speedMaster: string): Record<string, string>[] {
+    return [
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} "${sequence.displayName}"`,
+            "@_Wait": "0.10",
+        },
+        createSpeedMasterCommand(sequence.sequenceNumber, speedMaster),
+        ...createSequenceAppearanceAssignmentCommands(sequence.sequenceNumber, sequence.appearanceName, sequence.appearanceNumber, sequence.appearanceColor),
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length}`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Store Sequence ${sequence.sequenceNumber} Cue 1 Thru ${sequence.cues.length} Part 0.1`,
+            "@_Wait": "0.10",
+        },
+        ...createCueLabelCommands(sequence.sequenceNumber, sequence.cues),
+        ...createCueAppearanceAssignmentCommands(sequence.sequenceNumber, sequence.cues),
         ...createCueFadeCommands(sequence.sequenceNumber, sequence.cues),
         ...createCueTimingCommands(sequence.sequenceNumber, sequence.cues),
         {
@@ -175,12 +206,14 @@ function createBpmSequenceMacroLines(bpmSequence: BpmSequence, speedMaster: stri
 export function generateMacroXML(
     settings: ConversionSettings,
     uniqueCues: ConvertedMarker[],
+    regionSequences: RegionSequence[],
     repeatedSequences: RepeatedSequence[],
     bumpSequences: BumpSequence[],
     bpmSequence: BpmSequence | undefined,
     filename: string,
 ): string {
     const uniqueCuePlan = createUniqueCuePlan(uniqueCues);
+    const appearanceSetupCommands = collectAppearanceSetupCommands(regionSequences, repeatedSequences);
     const obj = {
         ...XML_HEADER,
         GMA3: {
@@ -194,12 +227,14 @@ export function generateMacroXML(
                         "@_Wait": "0.10",
                     },
                     createSpeedMasterCommand(settings.sequenceNumber, settings.speedMaster),
+                    ...appearanceSetupCommands,
                     ...uniqueCuePlan.map((item, index) => ({
                         "@_Command": `Label Sequence ${settings.sequenceNumber} Cue ${index + settings.cueStartNumber} "${item.cueName}"`,
                         "@_Wait": "0.10",
                     })),
                     ...createCueFadeCommands(settings.sequenceNumber, uniqueCuePlan),
                     ...createCueTimingCommands(settings.sequenceNumber, uniqueCuePlan),
+                    ...regionSequences.flatMap((sequence) => createRegionSequenceMacroLines(sequence, settings.speedMaster)),
                     ...repeatedSequences.flatMap((sequence) => createColorSequenceMacroLines(sequence, settings.speedMaster)),
                     ...bumpSequences.flatMap((sequence) => createBumpSequenceMacroLines(sequence, settings.speedMaster)),
                     ...(bpmSequence ? createBpmSequenceMacroLines(bpmSequence, settings.speedMaster) : []),
@@ -221,4 +256,47 @@ export function generateMacroXML(
     };
 
     return xmlBuilder.build(obj);
+}
+
+function collectAppearanceSetupCommands(regionSequences: RegionSequence[], repeatedSequences: RepeatedSequence[]): Record<string, string>[] {
+    const appearancesByNumber = new Map<
+        number,
+        {
+            appearanceName: string;
+            appearanceColor: string;
+        }
+    >();
+
+    for (const sequence of [...regionSequences, ...repeatedSequences]) {
+        if (sequence.appearanceNumber !== undefined && sequence.appearanceName && sequence.appearanceColor) {
+            appearancesByNumber.set(sequence.appearanceNumber, {
+                appearanceName: sequence.appearanceName,
+                appearanceColor: sequence.appearanceColor,
+            });
+        }
+
+        for (const cue of sequence.cues) {
+            if (cue.appearanceNumber !== undefined && cue.appearanceName && cue.appearanceColor) {
+                appearancesByNumber.set(cue.appearanceNumber, {
+                    appearanceName: cue.appearanceName,
+                    appearanceColor: cue.appearanceColor,
+                });
+            }
+        }
+    }
+
+    return [...appearancesByNumber.entries()].flatMap(([appearanceNumber, appearance]) => [
+        {
+            "@_Command": `Store Appearance ${appearanceNumber}`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Label Appearance ${appearanceNumber} "${appearance.appearanceName}"`,
+            "@_Wait": "0.10",
+        },
+        {
+            "@_Command": `Set Appearance ${appearanceNumber} "Color" "${appearance.appearanceColor}"`,
+            "@_Wait": "0.10",
+        },
+    ]);
 }

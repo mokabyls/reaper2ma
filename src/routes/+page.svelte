@@ -45,6 +45,7 @@
     let transportOutputFileName = "reaper_transport_macros.xml";
     let isDragOver = false;
     let isProcessing = false;
+    let isUsageModalOpen = false;
     let processingStatus = "";
     let exportStatus = "";
     let processingCompleted = false;
@@ -155,6 +156,26 @@
     function setExportProcessingState(message: string) {
         isProcessing = true;
         exportStatus = message;
+    }
+
+    function openUsageModal() {
+        isUsageModalOpen = true;
+    }
+
+    function closeUsageModal() {
+        isUsageModalOpen = false;
+    }
+
+    function handleWindowKeydown(event: KeyboardEvent) {
+        if (event.key === "Escape" && isUsageModalOpen) {
+            closeUsageModal();
+        }
+    }
+
+    function handleUsageModalBackdropClick(event: MouseEvent) {
+        if (event.target === event.currentTarget) {
+            closeUsageModal();
+        }
     }
 
     async function processFile(file: File) {
@@ -306,6 +327,8 @@
     }
 </script>
 
+<svelte:window on:keydown={handleWindowKeydown} />
+
 <svelte:head>
     <title>Reaper to GrandMA3 Converter</title>
     <meta name="description" content="Convert Reaper CSV marker files to GrandMA3 XML format" />
@@ -360,6 +383,10 @@
                         </div>
                     </label>
                     <input id="file-input" type="file" accept=".csv" bind:this={fileInput} on:change={handleFileChange} class="file-input" />
+                </div>
+
+                <div class="import-help-row">
+                    <button type="button" class="secondary-button" on:click={openUsageModal}>What you can encode</button>
                 </div>
 
                 {#if processingStatus && !isProcessing}
@@ -780,71 +807,80 @@
                     </button>
                 </div>
 
-                <div class="usage-card section-card">
-                    <div class="label">
-                        <span class="label-text">What you can encode</span>
-                        <span class="label-hint">Use square brackets at the start or end of the marker name.</span>
-                    </div>
-                    <div class="usage-grid">
-                        <div class="usage-item">
-                            <div class="usage-title">Main cues</div>
-                            <code>Intro</code>
-                            <p>Empty color stays in the main sequence.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Repeated sequences</div>
-                            <code>SD</code>
-                            <p>Any color creates one repeated sequence per distinct color.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Bump overlays</div>
-                            <code>[Temp] HIT</code>
-                            <p><code>Temp</code> and <code>Flash</code> create bump sequences for overlays.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Bump release</div>
-                            <code>[Temp|Release_250] / [TempRelease]</code>
-                            <p><code>Release_...</code> sets a delay in milliseconds; <code>TempRelease</code> or <code>FlashRelease</code> closes the latest unmatched bump.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Cue timing</div>
-                            <code>[FadeFromX_0.5|FadeToX_1.2] Verse</code>
-                            <p><code>Fade</code> and <code>Delay</code> modifiers are emitted on the cue macro line.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">BPM markers</div>
-                            <code>[BPM_129.5] Chorus</code>
-                            <p>Creates a dedicated BPM sequence and drives the configured Speed Master.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Execution token</div>
-                            <code>Intro [Go+]</code>
-                            <p>The trailing block can override the cue execution action.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Regions</div>
-                            <code>R1 / R2</code>
-                            <p>Hybrid mode uses regions as sequences and assigns each marker to the deepest region that contains it.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Global markers</div>
-                            <code>[GLOBAL] Cue</code>
-                            <p><code>[GLOBAL]</code> or <code>[MAIN]</code> keeps a marker in the main sequence even inside a region.</p>
-                        </div>
-                        <div class="usage-item">
-                            <div class="usage-title">Region arm/disarm</div>
-                            <code>[ON_R2] / [OFF_R1]</code>
-                            <p><code>ON</code> arms cue 1 on a region, <code>OFF</code> stops the previous region sequence.</p>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="wizard-actions">
                     <button type="button" class="secondary-button" on:click={() => (activeStep = 3)} disabled={!conversionArtifacts}>Back to summary</button>
                 </div>
             </section>
         {/if}
     </div>
+
+    {#if isUsageModalOpen}
+        <div class="modal-backdrop" role="presentation" on:click={handleUsageModalBackdropClick}>
+            <div class="usage-modal" role="dialog" aria-modal="true" aria-labelledby="usage-modal-title">
+                <div class="modal-header">
+                    <div>
+                        <div class="panel-kicker">Marker syntax</div>
+                        <h2 id="usage-modal-title">What you can encode</h2>
+                        <p>Use square brackets at the start or end of the marker name.</p>
+                    </div>
+                    <button type="button" class="modal-close-button" on:click={closeUsageModal} aria-label="Close marker syntax help">Close</button>
+                </div>
+
+                <div class="usage-grid">
+                    <div class="usage-item">
+                        <div class="usage-title">Main cues</div>
+                        <code>Intro</code>
+                        <p>Empty color stays in the main sequence.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Repeated sequences</div>
+                        <code>SD</code>
+                        <p>Any color creates one repeated sequence per distinct color.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Bump overlays</div>
+                        <code>[Temp] HIT</code>
+                        <p><code>Temp</code> and <code>Flash</code> create bump sequences for overlays.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Bump release</div>
+                        <code>[Temp|Release_250] / [TempRelease]</code>
+                        <p><code>Release_...</code> sets a delay in milliseconds; <code>TempRelease</code> or <code>FlashRelease</code> closes the latest unmatched bump.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Cue timing</div>
+                        <code>[FadeFromX_0.5|FadeToX_1.2] Verse</code>
+                        <p><code>Fade</code> and <code>Delay</code> modifiers are emitted on the cue macro line.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">BPM markers</div>
+                        <code>[BPM_129.5] Chorus</code>
+                        <p>Creates a dedicated BPM sequence and drives the configured Speed Master.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Execution token</div>
+                        <code>Intro [Go+]</code>
+                        <p>The trailing block can override the cue execution action.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Regions</div>
+                        <code>R1 / R2</code>
+                        <p>Hybrid mode uses regions as sequences and assigns each marker to the deepest region that contains it.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Global markers</div>
+                        <code>[GLOBAL] Cue</code>
+                        <p><code>[GLOBAL]</code> or <code>[MAIN]</code> keeps a marker in the main sequence even inside a region.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Region arm/disarm</div>
+                        <code>[ON_R2] / [OFF_R1]</code>
+                        <p><code>ON</code> arms cue 1 on a region, <code>OFF</code> stops the previous region sequence.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {/if}
 
     <footer class="footer">
         <p>Made with Svelte - View <a target="_blank" href="https://github.com/hrueger/reaper2ma">Source on GitHub</a></p>
@@ -1268,6 +1304,12 @@
         margin-bottom: 2rem;
     }
 
+    .import-help-row {
+        display: flex;
+        justify-content: center;
+        margin: -0.75rem 0 1.5rem;
+    }
+
     .status-message {
         margin: -0.5rem 0 1.5rem;
         padding: 0.85rem 1rem;
@@ -1458,10 +1500,6 @@
         overflow-x: auto;
     }
 
-    .usage-card {
-        margin-top: 1rem;
-    }
-
     .macro-presets-card {
         margin-top: 1.5rem;
     }
@@ -1576,6 +1614,68 @@
         color: var(--text-primary);
         font-size: 0.95rem;
         line-height: 1.5;
+    }
+
+    .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.25rem;
+        background: rgba(15, 23, 42, 0.58);
+        backdrop-filter: blur(4px);
+    }
+
+    .usage-modal {
+        width: min(920px, 100%);
+        max-height: min(760px, calc(100vh - 2.5rem));
+        overflow: auto;
+        border-radius: 14px;
+        border: 1px solid var(--card-border);
+        background: var(--card-bg);
+        box-shadow: 0 24px 70px rgba(15, 23, 42, 0.32);
+        padding: 1.25rem;
+    }
+
+    .modal-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .modal-header h2 {
+        margin: 0.1rem 0 0.35rem;
+        font-size: 1.35rem;
+    }
+
+    .modal-header p {
+        margin: 0;
+        color: var(--text-secondary);
+    }
+
+    .modal-close-button {
+        border: 1px solid var(--border-light);
+        border-radius: 8px;
+        background: var(--upload-bg);
+        color: var(--text-primary);
+        cursor: pointer;
+        flex-shrink: 0;
+        font-weight: 700;
+        padding: 0.65rem 0.85rem;
+        transition:
+            border-color 0.2s ease,
+            background 0.2s ease,
+            transform 0.2s ease;
+    }
+
+    .modal-close-button:hover {
+        border-color: var(--accent-blue);
+        background: var(--upload-hover);
+        transform: translateY(-1px);
     }
 
     .usage-grid {
@@ -1783,9 +1883,19 @@
 
         .panel-header,
         .wizard-actions,
-        .summary-block-header {
+        .summary-block-header,
+        .modal-header {
             flex-direction: column;
             align-items: flex-start;
+        }
+
+        .modal-backdrop {
+            padding: 0.75rem;
+        }
+
+        .usage-modal {
+            max-height: calc(100vh - 1.5rem);
+            padding: 1rem;
         }
 
         .radio-group {

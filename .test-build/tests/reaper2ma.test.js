@@ -19,7 +19,10 @@ import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseM
 const baseSettings = {
     sequenceNumber: 101,
     appearanceStartNumber: 1,
-    driveNumber: 2,
+    sequenceNamePrefix: "MA",
+    timecodeNumber: 1,
+    pageNumber: 1,
+    pageSlotStart: 201,
     cueStartNumber: 1,
     speedMaster: "3.4",
     prefix: "1",
@@ -38,9 +41,21 @@ const xmlParser = new XMLParser({
 function parseXml(xml) {
     return xmlParser.parse(xml);
 }
+function asArray(value) {
+    if (value === undefined) {
+        return [];
+    }
+    return Array.isArray(value) ? value : [value];
+}
+function getMacroCommands(xml) {
+    const parsed = parseXml(xml);
+    return asArray(parsed.GMA3.Macro.MacroLine).map((line) => line["@_Command"]);
+}
 describe("marker normalization", () => {
     it("preserves allowed marker characters and removes unsupported ones", () => {
         assert.equal(sanitizeMarkerName('Crash! "Main" / Intro'), "Crash Main / Intro");
+        assert.equal(sanitizeMarkerName("Début Billy / Montée façade Œuvre Übergröße"), "Début Billy / Montée façade Œuvre Übergröße");
+        assert.equal(sanitizeMarkerName("De\u0301but Billy"), "Début Billy");
     });
     it("extracts a final bracketed execution token when present", () => {
         assert.deepEqual(parseMarkerExecution("Intro [Temp|Flash]"), {
@@ -53,7 +68,7 @@ describe("marker normalization", () => {
         });
         assert.deepEqual(parseMarkerExecution("Intro [Boom]"), {
             displayName: "Intro",
-            execToken: "Goto",
+            execToken: "Go+",
         });
     });
     it("parses leading metadata tags and trailing execution tokens together", () => {
@@ -98,7 +113,7 @@ describe("marker normalization", () => {
         });
         assert.deepEqual(parseMarkerName("[FadeFromX_0.5|FadeToX_1.2|DelayFromY_0.25|DelayToZ_2] Intro"), {
             displayName: "Intro",
-            execToken: "Goto",
+            execToken: "Go+",
             tags: [
                 { key: "FADEFROMX", value: "0.5" },
                 { key: "FADETOX", value: "1.2" },
@@ -114,8 +129,14 @@ describe("marker normalization", () => {
         });
         assert.deepEqual(parseMarkerName("[FadeFromA_0.5] Intro"), {
             displayName: "Intro",
-            execToken: "Goto",
+            execToken: "Go+",
             tags: [{ key: "FADEFROMA", value: "0.5" }],
+        });
+        assert.deepEqual(parseMarkerName("[GLOBAL] Intro"), {
+            displayName: "Intro",
+            execToken: "Go+",
+            tags: [{ key: "GLOBAL", value: null }],
+            isGlobal: true,
         });
     });
     it("ignores invalid BPM metadata and keeps exporting", () => {
@@ -124,7 +145,7 @@ describe("marker normalization", () => {
         ]);
         assert.deepEqual(markers[0], {
             displayName: "Intro",
-            execToken: "Goto",
+            execToken: "Go+",
             tags: [{ key: "BPM", value: "bad" }],
             start: "0",
             color: "",
@@ -245,51 +266,91 @@ describe("marker normalization", () => {
         ]);
     });
     it("converts Reaper color values to grandMA3 appearance colors", () => {
-        assert.equal(convertReaperColorToGrandmaAppearanceColor("19005190"), "12.9,100.0,2.4,100.0");
-        assert.equal(convertReaperColorToGrandmaAppearanceColor("33554431"), "100.0,100.0,100.0,100.0");
+        assert.equal(convertReaperColorToGrandmaAppearanceColor("19005190"), 'COLOR="1,1,1,0" BackR=33 BackG=255 BackB=6 BackAlpha=221');
+        assert.equal(convertReaperColorToGrandmaAppearanceColor("33554431"), 'COLOR="1,1,1,0" BackR=255 BackG=255 BackB=255 BackAlpha=221');
+        assert.equal(convertReaperColorToGrandmaAppearanceColor("F2FF00"), 'COLOR="1,1,1,0" BackR=242 BackG=255 BackB=0 BackAlpha=221');
+        assert.equal(convertReaperColorToGrandmaAppearanceColor("#00BFFF"), 'COLOR="1,1,1,0" BackR=0 BackG=191 BackB=255 BackAlpha=221');
         assert.equal(convertReaperColorToGrandmaAppearanceColor(""), undefined);
     });
 });
 describe("conversion artifacts", () => {
     it("builds the expected XML artifacts from the fixture", () => {
         const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
+        const commands = getMacroCommands(artifacts.macroXml);
         assert.equal(artifacts.outputBaseName, "songcsv");
         assert.equal(artifacts.uniqueCues.length, 3);
         assert.equal(artifacts.repeatedSequences.length, 2);
         assert.equal(artifacts.bumpSequences.length, 0);
         assert.equal(artifacts.bpmSequence, undefined);
-        assert.equal(artifacts.macroXml.includes('Command="Store Appearance 1"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Label Appearance 1 &quot;R2MA Color 19005190&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Appearance 1 &quot;Color&quot; &quot;12.9,100.0,2.4,100.0&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 19005190&quot; at Sequence 102"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Store Appearance 2"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Label Appearance 2 &quot;R2MA Color 33554431&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 33554431&quot; at Sequence 103"'), true);
-        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 1 &quot;Intro&quot;'), true);
-        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 2 &quot;Intro 2&quot;'), true);
-        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 3 &quot;Outro&quot;'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Label Sequence 102 Cue 1 &quot;Start&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Label Sequence 103 Cue 1 &quot;Start&quot;"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.Sequence 101.Intro 2'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - Harry Potter Deb.Start'), true);
-        assert.equal(artifacts.macroXml.includes('Store Sequence 101 Cue 1 thru 3'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('Duration="6.000"'), true);
+        assert.equal(commands.includes("Store Appearance 1"), true);
+        assert.equal(commands.includes('Label Appearance 1 "R2MA Color 19005190"'), true);
+        assert.equal(commands.includes('Set Appearance 1 COLOR="1,1,1,0" BackR=33 BackG=255 BackB=6 BackAlpha=221'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 "MA Sequence 101"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 "MA Sequence 101"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 2 APPEARANCE="R2MA Color 19005190"'), true);
+        assert.equal(commands.includes("Store Appearance 2"), true);
+        assert.equal(commands.includes('Label Appearance 2 "R2MA Color 33554431"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 3 APPEARANCE="R2MA Color 33554431"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 Cue 1 "Intro"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 Cue 2 "Intro 2"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 Cue 3 "Outro"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 2 Cue 1 "Start"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 3 Cue 1 "Start"'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 Cue 1 Thru 3 /Merge'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 1 Property "SpeedMaster" #[Master 3.4]'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 2 Property "SpeedMaster" #[Master 3.4]'), true);
+        assert.equal(commands.includes('set 1 DURATION="6.000"'), true);
         const outputFiles = createConversionOutputFiles(artifacts);
-        assert.deepEqual(outputFiles.map((file) => file.name), ["songcsv_macro.xml", "songcsv_timecode.xml"]);
+        assert.deepEqual(outputFiles.map((file) => file.name), ["songcsv_macro.xml"]);
+    });
+    it("generates command-driven timecode inside the macro XML", () => {
+        const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
+        const parsed = parseXml(artifacts.macroXml);
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(parsed.GMA3["@_DataVersion"], "1.4.0.2");
+        assert.equal(parsed.GMA3.Timecode, undefined);
+        assert.equal(commands.includes('Delete DataPool "R2MA songcsv" /NC'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" /NC'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Timecode 1'), true);
+        assert.equal(commands.includes('Store Type "CmdSubTrack" 1'), true);
+        assert.equal(commands.includes('Set 2 "TIME" "1"'), true);
+        assert.equal(commands.includes('Set 2 "TOKEN" "Go+"'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 1 Cue 2 At Timecode 1.1.1.1.1.2'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 1 At Page 1.201'), true);
+        assert.equal(commands.includes('Move DataPool "R2MA songcsv" Sequence 1 Thru At Sequence 101'), true);
+        assert.equal(commands.includes('Move DataPool "R2MA songcsv" Timecode 1 Thru At Timecode 1'), true);
+        assert.equal(commands.includes('Delete DataPool "R2MA songcsv" /NoConfirm'), true);
+        assert.equal(artifacts.macroXml.includes("GMA3.Timecode"), false);
+        assert.equal(artifacts.macroXml.includes("RealtimeCmd"), false);
+        assert.equal(artifacts.macroXml.includes("CueDestination"), false);
+        assert.equal(artifacts.macroXml.includes("ValCueDestination"), false);
+        assert.equal(artifacts.macroXml.includes("import Timecode"), false);
+        assert.equal(artifacts.macroXml.includes("Drive"), false);
+        assert.equal(artifacts.macroXml.includes("FaderSubTrack"), false);
+        assert.equal(artifacts.macroXml.includes("ShowData.MediaPools.Sounds"), false);
+    });
+    it("keeps command time values in CSV seconds", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,0,
+2,Verse,110.167,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "long-time.csv", baseSettings);
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(commands.includes('Set 2 "TIME" "110.167"'), true);
+        assert.equal(commands.includes('set 1 DURATION="111.167"'), true);
     });
     it("builds a conversion preview from derived artifacts", () => {
         const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
         const preview = createConversionPreview(artifacts, 6);
-        assert.deepEqual(preview.outputFileNames, ["songcsv_macro.xml", "songcsv_timecode.xml"]);
+        assert.deepEqual(preview.outputFileNames, ["songcsv_macro.xml"]);
         assert.equal(preview.sourceMarkerCount, 6);
         assert.equal(preview.uniqueCueCount, 3);
         assert.equal(preview.repeatedSequenceCount, 2);
         assert.equal(preview.bumpSequenceCount, 0);
         assert.equal(preview.bpmEventCount, 0);
         assert.equal(preview.duration, "6.000");
-        assert.deepEqual(preview.generatedSequenceNames, ["1 - SD", "1 - Crash"]);
+        assert.deepEqual(preview.generatedSequenceNames, ["MA 1 - SD", "MA 1 - Crash"]);
         assert.equal(preview.warnings.length, 0);
     });
     it("builds hybrid region artifacts from the demo CSV fixture", () => {
@@ -297,27 +358,79 @@ describe("conversion artifacts", () => {
             ...baseSettings,
             importMode: "regions-and-markers",
         });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const tempDataPoolName = "R2MA testbillymarkerswithoutmpregionsmarkers";
         assert.equal(artifacts.regionSequences.length, 2);
         assert.deepEqual(artifacts.regionSequences.map((sequence) => ({
             regionId: sequence.regionId,
+            displayName: sequence.displayName,
             sequenceNumber: sequence.sequenceNumber,
             cues: sequence.cues.map((cue) => cue.name),
         })), [
-            { regionId: "R1", sequenceNumber: 102, cues: ["Introduction"] },
+            { regionId: "R1", displayName: "MA R1 - Introduction", sequenceNumber: 102, cues: ["Introduction"] },
             {
                 regionId: "R2",
+                displayName: "MA R2 - Introduction - Sub Region",
                 sequenceNumber: 103,
-                cues: ["Dbut Billy", "Billy A Cet Age", "Blanc", "Intro Musique", "Monte", "Fin monte"],
+                cues: ["Début Billy", "Billy A Cet Age", "Blanc", "Intro Musique", "Montée", "Fin montée"],
             },
         ]);
         assert.equal(artifacts.repeatedSequences.length, 1);
-        assert.equal(artifacts.repeatedSequences[0].displayName, "1 - Harry Potter Deb");
+        assert.equal(artifacts.repeatedSequences[0].displayName, "MA 1 - Harry Potter Deb");
         assert.equal(artifacts.bumpSequences.length, 0);
         assert.equal(artifacts.bpmSequence?.sequenceNumber, 105);
-        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 102 &quot;R1&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 103 &quot;R2&quot;"'), true);
-        assert.equal(artifacts.timecodeXml?.includes("ShowData.DataPools.Default.Sequences.R1.Introduction"), true);
-        assert.equal(artifacts.timecodeXml?.includes("ShowData.DataPools.Default.Sequences.R2.Début Billy"), true);
+        assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 1 "MA R1 - Introduction"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 1 "MA R1 - Introduction"`), true);
+        assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 2 "MA R2 - Introduction - Sub Region"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 "MA R2 - Introduction - Sub Region"`), true);
+        assert.equal(commands.includes("Store Appearance 1"), true);
+        assert.equal(commands.includes('Set Appearance 1 COLOR="1,1,1,0" BackR=217 BackG=61 BackB=0 BackAlpha=221'), true);
+        assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 2 Cue 4 APPEARANCE="R2MA Color F2FF00"`), true);
+        assert.equal(commands.includes('Set Appearance 2 COLOR="1,1,1,0" BackR=242 BackG=255 BackB=0 BackAlpha=221'), true);
+        assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 3 APPEARANCE="R2MA Color 00BFFF"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 1 "Début Billy"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 5 "Montée"`), true);
+        assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Timecode 1`), true);
+        assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1`), true);
+        assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Sequence 1 Thru At Sequence 102`), true);
+        assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Timecode 1 Thru At Timecode 1`), true);
+        assert.deepEqual(createConversionOutputFiles(artifacts).map((file) => file.name), ["testbillymarkerswithoutmpregionsmarkers_macro.xml"]);
+    });
+    it("keeps global markers in the main sequence even when they sit inside a region", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,10,10,
+1,[GLOBAL] Global Cue,1,,,
+2,Region Cue,2,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "global-region.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(artifacts.uniqueCues.length, 1);
+        assert.equal(artifacts.uniqueCues[0].displayName, "Global Cue");
+        assert.equal(artifacts.regionSequences.length, 1);
+        assert.deepEqual(artifacts.regionSequences[0].cues.map((cue) => cue.name), ["Region Cue"]);
+        assert.equal(commands.includes('Label DataPool "R2MA globalregion" Sequence 1 Cue 1 "Global Cue"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA globalregion" Sequence 1 Cue 1 "Region Cue"'), false);
+    });
+    it("calculates timecode duration from the latest generated event", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,10,20,10,
+1,Main Cue,0,,,
+2,Repeated Cue,5,,,19005190
+3,[Temp] Bump Cue,8,,,19005190
+4,Region Cue,19,,,
+5,[BPM_120] Late BPM,25,,,33554431
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "duration.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const preview = createConversionPreview(artifacts, 5);
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(commands.includes('set 1 DURATION="26.000"'), true);
+        assert.equal(preview.duration, "26.000");
     });
     it("falls back to Cue 1 for an unlabeled marker inside a region", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -330,7 +443,7 @@ R1,Region A,0,10,10,
         });
         assert.equal(artifacts.regionSequences.length, 1);
         assert.equal(artifacts.regionSequences[0].cues[0].name, "Cue 1");
-        assert.equal(artifacts.macroXml.includes('Command="Label Sequence 102 Cue 1 &quot;Cue 1&quot;"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Label DataPool "R2MA blankcue" Sequence 1 Cue 1 "Cue 1"'), true);
     });
     it("assigns sequence and cue appearances independently in hybrid mode", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -344,9 +457,9 @@ R1,Region A,0,10,10,123456
         });
         assert.equal(artifacts.regionSequences[0].appearanceName, "R2MA Color 123456");
         assert.equal(artifacts.regionSequences[0].cues[1].appearanceName, "R2MA Color 654321");
-        assert.equal(artifacts.regionSequences[0].cues[1].appearanceColor, "3.5,98.4,94.5,100.0");
-        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 123456&quot; at Sequence 102"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Assign Appearance &quot;R2MA Color 654321&quot; at Sequence 102 Cue 2"'), true);
+        assert.equal(artifacts.regionSequences[0].cues[1].appearanceColor, 'COLOR="1,1,1,0" BackR=9 BackG=251 BackB=241 BackAlpha=221');
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 APPEARANCE="R2MA Color 123456"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 Cue 2 APPEARANCE="R2MA Color 654321"'), true);
     });
     it("emits OFF before ON for compact region action tags", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -358,11 +471,13 @@ R2,Region Two,5,10,5,
             ...baseSettings,
             importMode: "regions-and-markers",
         });
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Off"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Goto|Go+"'), true);
-        assert.ok((artifacts.timecodeXml ?? "").indexOf('ExecToken="Off"') < (artifacts.timecodeXml ?? "").indexOf('ExecToken="Goto|Go+"'));
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.R1'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.R2.Cue 1'), true);
+        const commands = getMacroCommands(artifacts.macroXml);
+        const offTokenIndex = commands.indexOf('Set 1 "TOKEN" "Off"');
+        const onTokenIndex = commands.indexOf('Set 1 "TOKEN" "Go+"');
+        assert.notEqual(offTokenIndex, -1);
+        assert.notEqual(onTokenIndex, -1);
+        assert.ok(offTokenIndex < onTokenIndex);
+        assert.equal(commands.includes('Assign DataPool "R2MA regionactions" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
     });
     it("ignores region rows in markers-only mode", () => {
         const artifacts = convertReaperCsvToArtifacts(regionFixtureCsv, "test-billy-markers-without-mp3_regions_markers.csv", baseSettings);
@@ -414,8 +529,13 @@ R2,Region Two,5,10,5,
             ...baseSettings,
             exportMode: "cues-only",
         });
-        assert.equal(artifacts.timecodeXml, undefined);
+        const commands = getMacroCommands(artifacts.macroXml);
         assert.deepEqual(createConversionOutputFiles(artifacts).map((file) => file.name), ["demo_macro.xml"]);
+        assert.equal(commands.includes('Store DataPool "R2MA demo" Timecode 1'), false);
+        assert.equal(commands.includes('Store Type "CmdSubTrack" 1'), false);
+        assert.equal(commands.includes('Move DataPool "R2MA demo" Timecode 1 Thru At Timecode 1'), false);
+        assert.equal(commands.includes('Assign DataPool "R2MA demo" Sequence 1 At Page 1.201'), true);
+        assert.equal(commands.includes('Move DataPool "R2MA demo" Sequence 1 Thru At Sequence 101'), true);
     });
     it("keeps the current file name normalization semantics", () => {
         assert.equal(normalizeOutputBaseName("Song 01.CSV"), "songcsv");
@@ -440,12 +560,12 @@ R2,Region Two,5,10,5,
 3,SD,2,19005190
 `;
         const artifacts = convertReaperCsvToArtifacts(csv, "tokens.csv", baseSettings);
-        assert.equal(artifacts.macroXml.includes('Label Sequence 101 Cue 1 &quot;Intro&quot;'), true);
-        assert.equal(artifacts.macroXml.includes('Label Sequence 102 Cue 1 &quot;Start&quot;'), true);
-        assert.equal(artifacts.timecodeXml?.includes('Name="Load"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Load"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Go+"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ExecToken="Goto"'), true);
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(commands.includes('Label DataPool "R2MA tokens" Sequence 1 Cue 1 "Intro"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA tokens" Sequence 2 Cue 1 "Start"'), true);
+        assert.equal(commands.includes('Set 1 "TOKEN" "Load"'), true);
+        assert.equal(commands.includes('Set 1 "TOKEN" "Go+"'), true);
+        assert.equal(commands.includes('Set 2 "TOKEN" "Go+"'), true);
     });
     it("honors a configurable appearance start id", () => {
         const csv = `#,Name,Start,Color
@@ -461,8 +581,8 @@ R2,Region Two,5,10,5,
             appearanceNumber: sequence.appearanceNumber,
             appearanceColor: sequence.appearanceColor,
         })), [
-            { appearanceName: "R2MA Color 19005190", appearanceNumber: 50, appearanceColor: "12.9,100.0,2.4,100.0" },
-            { appearanceName: "R2MA Color 33554431", appearanceNumber: 51, appearanceColor: "100.0,100.0,100.0,100.0" },
+            { appearanceName: "R2MA Color 19005190", appearanceNumber: 50, appearanceColor: 'COLOR="1,1,1,0" BackR=33 BackG=255 BackB=6 BackAlpha=221' },
+            { appearanceName: "R2MA Color 33554431", appearanceNumber: 51, appearanceColor: 'COLOR="1,1,1,0" BackR=255 BackG=255 BackB=255 BackAlpha=221' },
         ]);
         assert.equal(artifacts.macroXml.includes('Command="Store Appearance 50"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Label Appearance 50 &quot;R2MA Color 19005190&quot;"'), true);
@@ -477,20 +597,21 @@ R2,Region Two,5,10,5,
 4,SD,3,19005190
 `;
         const artifacts = convertReaperCsvToArtifacts(csv, "bpm.csv", baseSettings);
+        const commands = getMacroCommands(artifacts.macroXml);
         assert.equal(artifacts.uniqueCues.length, 2);
         assert.equal(artifacts.repeatedSequences.length, 1);
         assert.equal(artifacts.bumpSequences.length, 0);
         assert.equal(artifacts.bpmSequence?.sequenceNumber, 103);
+        assert.equal(artifacts.bpmSequence?.displayName, "MA BPM");
         assert.equal(artifacts.bpmSequence?.events.length, 2);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Property &quot;SpeedMaster&quot; #[Master 3.4]"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 103 &quot;BPM&quot;"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA bpm" Sequence 3 Property "SpeedMaster" #[Master 3.4]'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA bpm" Sequence 3 "MA BPM"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA bpm" Sequence 3 "MA BPM"'), true);
         assert.equal(artifacts.macroXml.includes('Master 3.4 At BPM 129.5'), true);
         assert.equal(artifacts.macroXml.includes('Master 3.4 At BPM 123.45'), true);
-        assert.equal(artifacts.macroXml.includes('CuePart 1 Property &quot;CMD&quot; &quot;Master 3.4 At BPM 129.5&quot;'), true);
-        assert.equal(artifacts.timecodeXml?.includes('MarkerTrack'), true);
-        assert.equal(artifacts.timecodeXml?.includes('Name="BPM"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('Target="ShowData.DataPools.Default.Sequences.Sequence 103"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('Cue 1.Part 1'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA bpm" Sequence 3 Cue 1 Property "Command" "Master 3.4 At BPM 129.5"'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA bpm" Timecode 1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bpm" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
     });
     it("applies cue fade commands to unique, repeated and bump cues", () => {
         const csv = `#,Name,Start,Color
@@ -505,10 +626,10 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.repeatedSequences[0].cues[0].cueFade, "6/12");
         assert.equal(artifacts.repeatedSequences[0].cues[1].cueFade, "3/");
         assert.equal(artifacts.bumpSequences[0].cues[0].cueFade, "*2");
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 101 Cue &quot;Intro&quot; CueFade 5"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Start&quot; CueFade 6/12"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Hit&quot; CueFade 3/"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Cue &quot;Start&quot; CueFade *2"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuefade" Sequence 1 Cue 1 CueFade 5'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuefade" Sequence 2 Cue 1 CueFade 6/12'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuefade" Sequence 2 Cue 2 CueFade 3/'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuefade" Sequence 3 Cue 1 CueFade *2'), true);
     });
     it("emits cue timing modifiers for repeated and bump cues", () => {
         const csv = `#,Name,Start,Color
@@ -525,9 +646,9 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.repeatedSequences[0].cues[1].cueTiming?.[1].key, "DelayToZ");
         assert.equal(artifacts.bumpSequences[0].cues[0].cueTiming?.[0].key, "FadeFromY");
         assert.equal(artifacts.bumpSequences[0].cues[0].cueTiming?.[1].key, "DelayFromY");
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Start&quot; Part 0.1 FadeFromX &quot;0.5&quot; FadeToX &quot;1.2&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Hit&quot; Part 0.1 FadeFromX &quot;1.5&quot; DelayToZ &quot;2&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Cue &quot;Start&quot; Part 0.1 FadeFromY &quot;0.25&quot; DelayFromY &quot;0.75&quot;"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuetiming" Sequence 2 Cue 1 Part 0.1 FadeFromX "0.5" FadeToX "1.2"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuetiming" Sequence 2 Cue 2 Part 0.1 FadeFromX "1.5" DelayToZ "2"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA cuetiming" Sequence 3 Cue 1 Part 0.1 FadeFromY "0.25" DelayFromY "0.75"'), true);
     });
     it("ignores invalid BPM tags without creating a BPM sequence", () => {
         const csv = `#,Name,Start,Color
@@ -551,15 +672,15 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.repeatedSequences.length, 2);
         assert.equal(artifacts.bumpSequences.length, 2);
         assert.equal(artifacts.bumpSequences[0].color, "19005190");
-        assert.equal(artifacts.bumpSequences[0].displayName, "1 - Intro - BUMP - HIT");
+        assert.equal(artifacts.bumpSequences[0].displayName, "MA 1 - Intro - BUMP - HIT");
         assert.equal(artifacts.bumpSequences[0].cues[0].name, "Start");
         assert.equal(artifacts.bumpSequences[0].events[0].cueName, "Start");
         assert.equal(artifacts.bumpSequences[0].events[1].cueName, "Start");
         assert.equal(artifacts.bumpSequences[1].color, "33554431");
-        assert.equal(artifacts.bumpSequences[1].displayName, "1 - Verse - BUMP - HIT");
-        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 104 &quot;1 - Intro - BUMP - HIT&quot;"'), true);
-        assert.equal(artifacts.macroXml.includes('Command="Store Sequence 105 &quot;1 - Verse - BUMP - HIT&quot;"'), true);
-        assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - Intro - BUMP - HIT.Start'), true);
+        assert.equal(artifacts.bumpSequences[1].displayName, "MA 1 - Verse - BUMP - HIT");
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Store DataPool "R2MA bump" Sequence 3 "MA 1 - Intro - BUMP - HIT"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Store DataPool "R2MA bump" Sequence 4 "MA 1 - Verse - BUMP - HIT"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
     });
     it("warns when the main sequence is empty", () => {
         const csv = `#,Name,Start,Color
@@ -569,6 +690,8 @@ R2,Region Two,5,10,5,
         const artifacts = convertReaperCsvToArtifacts(csv, "warning.csv", baseSettings);
         const preview = createConversionPreview(artifacts, 2);
         assert.equal(preview.warnings.some((warning) => warning.includes("séquence principale")), true);
+        assert.equal(artifacts.macroXml.includes("Cue 1 thru 0"), false);
+        assert.equal(artifacts.macroXml.includes('Sequence 101 Property &quot;SpeedMaster&quot;'), false);
     });
 });
 describe("reaper transport macro library", () => {

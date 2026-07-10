@@ -42,6 +42,10 @@ export function parseRegions(rows: ReaperRegionRow[]): ParsedRegion[] {
 
 export function assignMarkersToRegions(markers: ConvertedMarker[], regions: ParsedRegion[]): ConvertedMarker[] {
     return markers.map((marker) => {
+        if (marker.isGlobal) {
+            return marker;
+        }
+
         const region = resolveContainingRegion(marker.start, regions);
 
         if (!region) {
@@ -127,7 +131,7 @@ export function buildRegionSequences(
             });
             events.push({
                 timestamp: region.start,
-                execToken: "Goto",
+                execToken: "Go+",
                 cueNumber: 1,
                 cueName: "Cue 1",
                 regionActions: [],
@@ -136,7 +140,7 @@ export function buildRegionSequences(
 
         regionSequences.push({
             regionId: region.regionId,
-            displayName: region.regionId,
+            displayName: createRegionSequenceDisplayName(region),
             regionLabel: region.regionLabel,
             start: region.start,
             end: region.end,
@@ -158,6 +162,12 @@ export function buildRegionSequences(
         regionSequences,
         nextSequenceNumber: sequenceNumber + regions.length,
     };
+}
+
+function createRegionSequenceDisplayName(region: ParsedRegion): string {
+    const regionLabel = sanitizeMarkerName(region.regionLabel).trim();
+
+    return regionLabel ? `${region.regionId} - ${regionLabel}` : region.regionId;
 }
 
 function createRegionCuePlan(

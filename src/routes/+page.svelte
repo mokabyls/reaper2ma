@@ -26,7 +26,10 @@
     let selectedMarkerCount = 0;
     let sequenceNumber = 101;
     let appearanceStartNumber = 1;
-    let driveNumber = 2;
+    let sequenceNamePrefix = "MA";
+    let timecodeNumber = 1;
+    let pageNumber = 1;
+    let pageSlotStart = 201;
     let cueStartNumber = 1;
     let speedMaster = "3.4";
     let prefix = "1";
@@ -46,6 +49,19 @@
     let selectedFileName = "";
     let selectedFileBaseName = "";
     let resolvedExampleMacroTimecodeName = "";
+    let conversionSettings: ConversionSettings = {
+        sequenceNumber,
+        appearanceStartNumber,
+        sequenceNamePrefix,
+        timecodeNumber,
+        pageNumber,
+        pageSlotStart,
+        cueStartNumber,
+        speedMaster,
+        prefix,
+        importMode,
+        exportMode,
+    };
     let conversionArtifacts: ConversionArtifacts | undefined = undefined;
     let conversionPreview: ConversionPreview | undefined = undefined;
 
@@ -75,26 +91,26 @@
     ] as const;
 
     $: resolvedExampleMacroTimecodeName = resolveExampleMacroTimecodeName(timecodeName, selectedFileBaseName);
+    $: conversionSettings = {
+        sequenceNumber,
+        appearanceStartNumber,
+        sequenceNamePrefix,
+        timecodeNumber,
+        pageNumber,
+        pageSlotStart,
+        cueStartNumber,
+        speedMaster,
+        prefix,
+        importMode,
+        exportMode,
+    };
     $: conversionArtifacts =
         selectedCsvText && selectedFileName
-            ? convertReaperCsvToArtifacts(selectedCsvText, selectedFileName, getConversionSettings())
+            ? convertReaperCsvToArtifacts(selectedCsvText, selectedFileName, conversionSettings)
             : undefined;
     $: conversionPreview = conversionArtifacts ? createConversionPreview(conversionArtifacts, selectedMarkerCount) : undefined;
 
     const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-    function getConversionSettings(): ConversionSettings {
-        return {
-            sequenceNumber,
-            appearanceStartNumber,
-            driveNumber,
-            cueStartNumber,
-            speedMaster,
-            prefix,
-            importMode,
-            exportMode,
-        };
-    }
 
     function getMacroPresetSelection(): ExampleMacroPresetSelection {
         return {
@@ -170,7 +186,7 @@
             return;
         }
 
-        setProcessingState("Generating XML files...");
+        setProcessingState("Generating macro XML...");
 
         try {
             await delay(100);
@@ -179,7 +195,7 @@
                 downloadTextFile(outputFile.content, outputFile.name);
             }
 
-            processingStatus = "✅ Files generated successfully!";
+            processingStatus = "✅ Macro generated successfully!";
             processingCompleted = true;
             isProcessing = false;
         } catch (error) {
@@ -435,6 +451,14 @@
                     </div>
 
                     <div class="input-group">
+                        <label for="sequence-name-prefix" class="label">
+                            <span class="label-text">Sequence Name Prefix</span>
+                            <span class="label-hint">Letters added before every generated sequence name</span>
+                        </label>
+                        <input id="sequence-name-prefix" type="text" bind:value={sequenceNamePrefix} class="input" />
+                    </div>
+
+                    <div class="input-group">
                         <div class="label">
                             <span class="label-text">Import Mode</span>
                             <span class="label-hint">Choose the classic flow or the hybrid regions + markers flow.</span>
@@ -476,11 +500,27 @@
                     </div>
 
                     <div class="input-group" class:disabled={exportMode === "cues-only"}>
-                        <label for="drive-number" class="label">
-                            <span class="label-text">Drive Number</span>
-                            <span class="label-hint">Drive to use for import (1-8)</span>
+                        <label for="timecode-number" class="label">
+                            <span class="label-text">Timecode Number</span>
+                            <span class="label-hint">Destination timecode object for the generated macro</span>
                         </label>
-                        <input id="drive-number" type="number" min="1" max="8" step="1" bind:value={driveNumber} class="input" disabled={exportMode === "cues-only"} />
+                        <input id="timecode-number" type="number" min="1" max="9999" step="1" bind:value={timecodeNumber} class="input" disabled={exportMode === "cues-only"} />
+                    </div>
+
+                    <div class="input-group">
+                        <label for="page-number" class="label">
+                            <span class="label-text">Page Number</span>
+                            <span class="label-hint">Page receiving the generated sequence assignments</span>
+                        </label>
+                        <input id="page-number" type="number" min="1" max="9999" step="1" bind:value={pageNumber} class="input" />
+                    </div>
+
+                    <div class="input-group">
+                        <label for="page-slot-start" class="label">
+                            <span class="label-text">Page Slot Start</span>
+                            <span class="label-hint">First executor slot used for generated sequences</span>
+                        </label>
+                        <input id="page-slot-start" type="number" min="1" max="9999" step="1" bind:value={pageSlotStart} class="input" />
                     </div>
                 </div>
 
@@ -537,7 +577,7 @@
                     <div>
                         <div class="panel-kicker">Step 3</div>
                         <h2>Summary</h2>
-                        <p>Review the generated cues and XML files before downloading anything.</p>
+                        <p>Review the generated cues and macro command export before downloading anything.</p>
                     </div>
                 </div>
 
@@ -633,7 +673,7 @@
 
                     <div class="wizard-actions">
                         <button type="button" class="secondary-button" on:click={() => (activeStep = 2)}>Back to settings</button>
-                        <button type="button" class="primary-button" on:click={exportConversionArtifacts} disabled={isProcessing}>Generate XML files</button>
+                        <button type="button" class="primary-button" on:click={exportConversionArtifacts} disabled={isProcessing}>Generate macro XML</button>
                     </div>
                 {:else}
                     <div class="empty-state">
@@ -784,6 +824,11 @@
                             <div class="usage-title">Regions</div>
                             <code>R1 / R2</code>
                             <p>Hybrid mode uses regions as sequences and assigns each marker to the deepest region that contains it.</p>
+                        </div>
+                        <div class="usage-item">
+                            <div class="usage-title">Global markers</div>
+                            <code>[GLOBAL] Cue</code>
+                            <p><code>[GLOBAL]</code> or <code>[MAIN]</code> keeps a marker in the main sequence even inside a region.</p>
                         </div>
                         <div class="usage-item">
                             <div class="usage-title">Region arm/disarm</div>

@@ -207,6 +207,13 @@ export function createBpmSequence(bpmMarkers, sequenceNumber, repeatedSequenceCo
         })),
     };
 }
+export function applySequenceNamePrefix(name, prefix) {
+    const trimmedPrefix = prefix.trim();
+    if (!trimmedPrefix) {
+        return name;
+    }
+    return `${trimmedPrefix} ${name}`;
+}
 function createUniqueSequenceName(name, usedSequenceNames) {
     const currentCount = usedSequenceNames.get(name) ?? 0;
     usedSequenceNames.set(name, currentCount + 1);

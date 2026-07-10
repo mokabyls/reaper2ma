@@ -36,7 +36,7 @@ export function createConversionPreview(artifacts: ConversionArtifacts, sourceMa
     const warnings: string[] = [];
 
     if (artifacts.uniqueCues.length === 0) {
-        warnings.push("La séquence principale est vide: un CSV entièrement coloré peut produire un range invalide.");
+        warnings.push("La séquence principale est vide: aucun cue ne sera créé dans la séquence de base.");
     }
 
     if (artifacts.importMode === "regions-and-markers" && artifacts.regionSequences.length === 0) {
@@ -59,10 +59,7 @@ export function createConversionPreview(artifacts: ConversionArtifacts, sourceMa
         appearanceCount,
         duration: calculateTimecodeDuration(timestamps),
         generatedSequenceNames,
-        outputFileNames: [
-            buildOutputFileName(artifacts.outputBaseName, "macro"),
-            ...(artifacts.timecodeXml ? [buildOutputFileName(artifacts.outputBaseName, "timecode")] : []),
-        ],
+        outputFileNames: [buildOutputFileName(artifacts.outputBaseName, "macro")],
         warnings,
     };
 }

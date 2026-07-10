@@ -2,7 +2,8 @@ import { createAppearanceNameFromReaperColor, convertReaperColorToGrandmaAppeara
 import { assignMarkersToRegions, buildRegionSequences, parseRegions } from "./region-services.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
 import { createBpmSequence, groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerRows, isRegionRow, splitMarkerRows, } from "./markers.js";
-import { generateMacroXML, generateTimecodeXML } from "./xml.js";
+import { applySequenceNamePrefix } from "./sequence-services.js";
+import { generateMacroXML } from "./xml.js";
 export function convertReaperMarkersToArtifacts(normalizedMarkers, sourceFileName, settings) {
     return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], sourceFileName, settings);
 }
@@ -14,19 +15,12 @@ export function convertReaperCsvToArtifacts(dataString, sourceFileName, settings
     return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings);
 }
 export function createConversionOutputFiles(artifacts) {
-    const files = [
+    return [
         {
             name: buildOutputFileName(artifacts.outputBaseName, "macro"),
             content: artifacts.macroXml,
         },
     ];
-    if (artifacts.timecodeXml) {
-        files.push({
-            name: buildOutputFileName(artifacts.outputBaseName, "timecode"),
-            content: artifacts.timecodeXml,
-        });
-    }
-    return files;
 }
 function convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings) {
     const appearanceRegistry = createAppearanceRegistry(settings.appearanceStartNumber);
@@ -43,20 +37,17 @@ function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings
     const bumpSequences = groupBumpSequences(bumpMarkers, settings.sequenceNumber + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor);
     const bpmMarkers = normalizedMarkers.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
-    const macroXml = generateMacroXML(settings, uniqueCues, [], repeatedSequences, bumpSequences, bpmSequence, outputBaseName);
-    const timecodeXml = settings.exportMode === "cues-and-timecode"
-        ? generateTimecodeXML(settings, uniqueCues, [], repeatedSequences, bumpSequences, bpmSequence, outputBaseName)
-        : undefined;
+    const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], repeatedSequences, bumpSequences, bpmSequence);
+    const macroXml = generateMacroXML(settings, uniqueCues, prefixed.regionSequences, prefixed.repeatedSequences, prefixed.bumpSequences, prefixed.bpmSequence, outputBaseName);
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
-        regionSequences: [],
+        regionSequences: prefixed.regionSequences,
         uniqueCues,
-        repeatedSequences,
-        bumpSequences,
-        bpmSequence,
+        repeatedSequences: prefixed.repeatedSequences,
+        bumpSequences: prefixed.bumpSequences,
+        bpmSequence: prefixed.bpmSequence,
         macroXml,
-        timecodeXml,
     };
 }
 function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry) {
@@ -70,20 +61,48 @@ function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, s
     const bumpSequences = groupBumpSequences(bumpMarkers, nextSequenceAfterRegions + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor);
     const bpmMarkers = markersWithRegions.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, regionSequences.length + repeatedSequences.length + bumpSequences.length);
-    const macroXml = generateMacroXML(settings, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence, outputBaseName);
-    const timecodeXml = settings.exportMode === "cues-and-timecode"
-        ? generateTimecodeXML(settings, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence, outputBaseName)
-        : undefined;
+    const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, regionSequences, repeatedSequences, bumpSequences, bpmSequence);
+    const macroXml = generateMacroXML(settings, uniqueCues, prefixed.regionSequences, prefixed.repeatedSequences, prefixed.bumpSequences, prefixed.bpmSequence, outputBaseName);
     return {
         importMode: settings.importMode ?? "regions-and-markers",
         outputBaseName,
-        regionSequences,
+        regionSequences: prefixed.regionSequences,
         uniqueCues,
-        repeatedSequences,
-        bumpSequences,
-        bpmSequence,
+        repeatedSequences: prefixed.repeatedSequences,
+        bumpSequences: prefixed.bumpSequences,
+        bpmSequence: prefixed.bpmSequence,
         macroXml,
-        timecodeXml,
+    };
+}
+function prefixGeneratedSequences(sequenceNamePrefix, regionSequences, repeatedSequences, bumpSequences, bpmSequence) {
+    const prefix = sequenceNamePrefix.trim();
+    if (!prefix) {
+        return {
+            regionSequences,
+            repeatedSequences,
+            bumpSequences,
+            bpmSequence,
+        };
+    }
+    return {
+        regionSequences: regionSequences.map((sequence) => ({
+            ...sequence,
+            displayName: applySequenceNamePrefix(sequence.displayName, prefix),
+        })),
+        repeatedSequences: repeatedSequences.map((sequence) => ({
+            ...sequence,
+            displayName: applySequenceNamePrefix(sequence.displayName, prefix),
+        })),
+        bumpSequences: bumpSequences.map((sequence) => ({
+            ...sequence,
+            displayName: applySequenceNamePrefix(sequence.displayName, prefix),
+        })),
+        bpmSequence: bpmSequence
+            ? {
+                ...bpmSequence,
+                displayName: applySequenceNamePrefix(bpmSequence.displayName, prefix),
+            }
+            : bpmSequence,
     };
 }
 function createAppearanceRegistry(startNumber) {

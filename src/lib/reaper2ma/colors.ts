@@ -1,9 +1,6 @@
 const REAPER_COLOR_MASK = 0xFFFFFF;
-const MAX_COLOR_CHANNEL = 255;
-
-function formatGrandmaColorChannel(channel: number): string {
-    return (Math.round((channel / MAX_COLOR_CHANNEL) * 1000) / 10).toFixed(1);
-}
+const GRANDMA_APPEARANCE_COLOR = "1,1,1,0";
+const GRANDMA_APPEARANCE_BACK_ALPHA = 221;
 
 function parseReaperColorValue(color: string): number | undefined {
     const trimmedColor = color.trim();
@@ -12,8 +9,16 @@ function parseReaperColorValue(color: string): number | undefined {
         return undefined;
     }
 
+    if (/^#[0-9a-f]{6}$/i.test(trimmedColor)) {
+        return Number.parseInt(trimmedColor.slice(1), 16);
+    }
+
     if (/^0x[0-9a-f]+$/i.test(trimmedColor)) {
         return Number.parseInt(trimmedColor.slice(2), 16);
+    }
+
+    if (/^[0-9a-f]{6}$/i.test(trimmedColor) && /[a-f]/i.test(trimmedColor)) {
+        return Number.parseInt(trimmedColor, 16);
     }
 
     if (!/^\d+$/.test(trimmedColor)) {
@@ -31,11 +36,11 @@ export function convertReaperColorToGrandmaAppearanceColor(color: string): strin
     }
 
     const rgb = parsedColor & REAPER_COLOR_MASK;
-    const red = formatGrandmaColorChannel((rgb >> 16) & 0xff);
-    const green = formatGrandmaColorChannel((rgb >> 8) & 0xff);
-    const blue = formatGrandmaColorChannel(rgb & 0xff);
+    const red = (rgb >> 16) & 0xff;
+    const green = (rgb >> 8) & 0xff;
+    const blue = rgb & 0xff;
 
-    return `${red},${green},${blue},100.0`;
+    return `COLOR="${GRANDMA_APPEARANCE_COLOR}" BackR=${red} BackG=${green} BackB=${blue} BackAlpha=${GRANDMA_APPEARANCE_BACK_ALPHA}`;
 }
 
 export function createAppearanceNameFromReaperColor(color: string): string {

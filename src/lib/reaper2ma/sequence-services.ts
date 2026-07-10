@@ -269,6 +269,16 @@ export function createBpmSequence(
     };
 }
 
+export function applySequenceNamePrefix(name: string, prefix: string): string {
+    const trimmedPrefix = prefix.trim();
+
+    if (!trimmedPrefix) {
+        return name;
+    }
+
+    return `${trimmedPrefix} ${name}`;
+}
+
 function createUniqueSequenceName(name: string, usedSequenceNames: Map<string, number>): string {
     const currentCount = usedSequenceNames.get(name) ?? 0;
     usedSequenceNames.set(name, currentCount + 1);

@@ -54,6 +54,7 @@ export type ConvertedMarker = {
     displayName: string;
     execToken: string;
     tags: MarkerTag[];
+    isGlobal?: boolean;
     regionActions?: RegionActionTag[];
     start: string;
     color: string;
@@ -137,7 +138,10 @@ export type ConversionSettings = {
     importMode?: ImportMode;
     sequenceNumber: number;
     appearanceStartNumber: number;
-    driveNumber: number;
+    sequenceNamePrefix: string;
+    timecodeNumber: number;
+    pageNumber: number;
+    pageSlotStart: number;
     cueStartNumber: number;
     speedMaster: string;
     prefix: string;
@@ -194,5 +198,4 @@ export type ConversionArtifacts = {
     bumpSequences: BumpSequence[];
     bpmSequence?: BpmSequence;
     macroXml: string;
-    timecodeXml?: string;
 };

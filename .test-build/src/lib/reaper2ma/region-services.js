@@ -25,6 +25,9 @@ export function parseRegions(rows) {
 }
 export function assignMarkersToRegions(markers, regions) {
     return markers.map((marker) => {
+        if (marker.isGlobal) {
+            return marker;
+        }
         const region = resolveContainingRegion(marker.start, regions);
         if (!region) {
             return marker;
@@ -95,7 +98,7 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
             });
             events.push({
                 timestamp: region.start,
-                execToken: "Goto",
+                execToken: "Go+",
                 cueNumber: 1,
                 cueName: "Cue 1",
                 regionActions: [],
@@ -103,7 +106,7 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
         }
         regionSequences.push({
             regionId: region.regionId,
-            displayName: region.regionId,
+            displayName: createRegionSequenceDisplayName(region),
             regionLabel: region.regionLabel,
             start: region.start,
             end: region.end,
@@ -124,6 +127,10 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
         regionSequences,
         nextSequenceNumber: sequenceNumber + regions.length,
     };
+}
+function createRegionSequenceDisplayName(region) {
+    const regionLabel = sanitizeMarkerName(region.regionLabel).trim();
+    return regionLabel ? `${region.regionId} - ${regionLabel}` : region.regionId;
 }
 function createRegionCuePlan(markers, resolveAppearance) {
     const seenNames = new Map();

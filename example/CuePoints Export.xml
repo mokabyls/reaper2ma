@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="1.4.0.0">
+  <Macro Name="CuePoints2026d07d10T19t52t02">
+    <MacroLine Command="cd root" Wait="0.01"/>
+    <MacroLine Command="Store Appearance &quot;Cue Point Choreo&quot;"/>
+    <MacroLine Command="Set Appearance &quot;Cue Point Choreo&quot; COLOR=&quot;1,1,1,0&quot; BackR=100 BackG=43 BackB=32 BackAlpha=221"/>
+    <MacroLine Command="Store Appearance &quot;Cue Point Audio&quot;"/>
+    <MacroLine Command="Set Appearance &quot;Cue Point Audio&quot; COLOR=&quot;1,1,1,0&quot; BackR=24 BackG=71 BackB=86 BackAlpha=221"/>
+    <MacroLine Command="Store Appearance &quot;Cue Point Notes&quot;"/>
+    <MacroLine Command="Set Appearance &quot;Cue Point Notes&quot; COLOR=&quot;1,1,1,0&quot; BackR=18 BackG=38 BackB=83 BackAlpha=221"/>
+    <MacroLine Command="Delete DataPool &quot;CuePoints2026d07d10T19t52t02&quot; /NC"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; /NC"/>
+    <MacroLine Command="Delete DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 /NC"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 Cue 1 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 Cue 1 NOTE=&quot;Choreo&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 Cue 1 APPEARANCE=&quot;Cue Point Choreo&quot;"/>
+    <MacroLine Command="Set  DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 APPEARANCE=&quot;Cue Point Choreo&quot;"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 1 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 1 NOTE=&quot;Audio&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 1 APPEARANCE=&quot;Cue Point Audio&quot;"/>
+    <MacroLine Command="Set  DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 APPEARANCE=&quot;Cue Point Audio&quot;"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 2 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 2 NOTE=&quot;Audio&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 2 APPEARANCE=&quot;Cue Point Audio&quot;"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 Cue 1 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 Cue 1 NOTE=&quot;Notes&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 Cue 1 APPEARANCE=&quot;Cue Point Notes&quot;"/>
+    <MacroLine Command="Set  DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 APPEARANCE=&quot;Cue Point Notes&quot;"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 1 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 1 NOTE=&quot;Lighting&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 1 APPEARANCE=&quot;Cue Point Lighting&quot;"/>
+    <MacroLine Command="Set  DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 APPEARANCE=&quot;Cue Point Lighting&quot;"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 2 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 2 NOTE=&quot;Lighting&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 2 APPEARANCE=&quot;Cue Point Lighting&quot;"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 Cue 1 /Merge"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 Cue 1 NOTE=&quot;Pyro&quot;"/>
+    <MacroLine Command="Set DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 Cue 1 APPEARANCE=&quot;Cue Point Pyro&quot;"/>
+    <MacroLine Command="Set  DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 APPEARANCE=&quot;Cue Point Pyro&quot;"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="Store DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1"/>
+    <MacroLine Command="Store 1 &quot;CuePoints&quot;"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot;"/>
+    <MacroLine Command="cd &quot;Timecodes&quot;"/>
+    <MacroLine Command="set 1 OFFSETTCSLOT=&quot;0&quot;"/>
+    <MacroLine Command="set 1 DURATION=&quot;797,832&quot;"/>
+    <MacroLine Command="set 1 IGNOREFOLLOW=&quot;1&quot;"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 At 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store Type &quot;CmdSubTrack&quot; 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store 1"/>
+    <MacroLine Command="Set 1 &quot;TIME&quot; &quot;69.833&quot;"/>
+    <MacroLine Command="Set 1 &quot;TOKEN&quot; &quot;Go+&quot;"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot;"/>
+    <MacroLine Command="Assign DataPool CuePoints2026d07d10T19t52t02 Sequence  1 Cue 1 At Timecode 1.1.1.1.1.1"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store 2"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 At 2"/>
+    <MacroLine Command="cd 2"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store Type &quot;CmdSubTrack&quot; 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store 1"/>
+    <MacroLine Command="Set 1 &quot;TIME&quot; &quot;214.067&quot;"/>
+    <MacroLine Command="Set 1 &quot;TOKEN&quot; &quot;Go+&quot;"/>
+    <MacroLine Command="Store 2"/>
+    <MacroLine Command="Set 2 &quot;TIME&quot; &quot;314.6&quot;"/>
+    <MacroLine Command="Set 2 &quot;TOKEN&quot; &quot;Go+&quot;"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot;"/>
+    <MacroLine Command="Assign DataPool CuePoints2026d07d10T19t52t02 Sequence  2 Cue 1 At Timecode 1.1.2.1.1.1"/>
+    <MacroLine Command="Assign DataPool CuePoints2026d07d10T19t52t02 Sequence  2 Cue 2 At Timecode 1.1.2.1.1.2"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store 3"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 At 3"/>
+    <MacroLine Command="cd 3"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store Type &quot;CmdSubTrack&quot; 1"/>
+    <MacroLine Command="cd 1"/>
+    <MacroLine Command="Store 1"/>
+    <MacroLine Command="Set 1 &quot;TIME&quot; &quot;314.6&quot;"/>
+    <MacroLine Command="Set 1 &quot;TOKEN&quot; &quot;Go+&quot;"/>
+    <MacroLine Command="cd root"/>
+    <MacroLine Command="cd DataPool &quot;CuePoints2026d07d10T19t52t02&quot;"/>
+    <MacroLine Command="Assign DataPool CuePoints2026d07d10T19t52t02 Sequence  3 Cue 1 At Timecode 1.1.3.1.1.1"/>
+    <MacroLine Command="cd root" Wait="0.01"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 At Page 1.201"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 At Page 1.202"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 At Page 1.204"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 At Page 1.205"/>
+    <MacroLine Command="Assign DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 At Page 1.206"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 Cue 1 &quot;test&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 1 &quot;test&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 Cue 2 &quot;ratata&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 Cue 1 &quot;tetete&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 1 &quot;&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 Cue 2 &quot;lighting&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 Cue 1 &quot;piro&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 &quot;Choreo 1&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 2 &quot;Audio 1&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 3 &quot;Notes 1&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 4 &quot;Lighting 1&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 5 &quot;Pyro 1&quot;"/>
+    <MacroLine Command="Label DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1 &quot;0-la-traversees-des-mondes-FINAL-V3-13min-Low-Quality&quot;"/>
+    <MacroLine Command="Label Page 1 &quot;0-la-traversees-des-mondes-FINAL-V3-13min-Low-Quality&quot;"/>
+    <MacroLine Command="Move DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Sequence 1 Thru At Sequence 1"/>
+    <MacroLine Command="Move DataPool &quot;CuePoints2026d07d10T19t52t02&quot; Timecode 1 Thru At Timecode 1"/>
+    <MacroLine Command="Delete DataPool &quot;CuePoints2026d07d10T19t52t02&quot; /NoConfirm"/>
+  </Macro>
+</GMA3>

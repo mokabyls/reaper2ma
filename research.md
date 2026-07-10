@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds grandMA3 macro/timecode XML with `fast-xml-parser` and immediately downloads one or two XML files.
+This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 macro XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds one grandMA3 macro XML file with `fast-xml-parser`. In `cues-and-timecode` mode, that macro creates the timecode, tracks, events, and cue assignments by grandMA commands instead of exporting a separate `GMA3.Timecode` XML object.
 
 The core product logic now lives in `src/lib/reaper2ma/*` rather than the page component. There is a conversion library, XML generation helpers, and automated fixture tests. After installing locked dependencies with `pnpm install --frozen-lockfile`, both `pnpm check` and `pnpm build` pass.
 
@@ -67,6 +67,7 @@ Available scripts:
 - `pnpm dev` - Run Vite dev server.
 - `pnpm build` - Build static production output to `build/`.
 - `pnpm preview` - Preview the production build locally.
+- `pnpm generate:demo` - Compile the converter to `.cli-build/`, generate the macro XML from the demo regions+markers CSV, and write ignored output files to `demo/generated/`.
 - `pnpm check` - Run `svelte-kit sync` and `svelte-check`.
 - `pnpm check:watch` - Watch-mode Svelte checking.
 
@@ -103,17 +104,20 @@ The page has one primary workflow:
 6. In markers-only mode, rows with empty color become `uniqueCues`.
 7. In markers-only mode, rows with non-empty color are grouped by exact color into `repeatedSequences`.
 8. In hybrid mode, rows with `End` or `Length` define regions. Markers are attached to the most nested containing region.
-9. In hybrid mode, markers inside regions become cues in the region sequence. Region color creates the sequence appearance and marker color creates the cue appearance.
-10. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
-11. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-12. Macro XML is always generated and downloaded.
-13. Timecode XML is generated and downloaded only in `cues-and-timecode` mode.
-14. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
+9. In hybrid mode, markers inside regions become cues in a region sequence named from the region ID and label, for example `R2 - Introduction - Sub Region`. Region color creates the sequence appearance and marker color creates the cue appearance.
+10. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
+11. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
+12. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+13. Macro XML is always generated and downloaded as a single file.
+14. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
+15. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
 
 The default settings are:
 
 - `sequenceNumber = 101`
-- `driveNumber = 2`
+- `timecodeNumber = 1`
+- `pageNumber = 1`
+- `pageSlotStart = 201`
 - `cueStartNumber = 1`
 - `prefix = "1"`
 - `importMode = "markers-only"`
@@ -121,8 +125,8 @@ The default settings are:
 
 The two export modes are:
 
-- `cues-and-timecode` - Downloads `<filename>_macro.xml` and `<filename>_timecode.xml`; macro includes drive selection and timecode import commands.
-- `cues-only` - Downloads only `<filename>_macro.xml`; macro omits drive/timecode import commands and the drive input is disabled in the UI.
+- `cues-and-timecode` - Downloads `<filename>_macro.xml`; macro creates sequences, cues, appearances, page assignments, the timecode object, tracks, command events, and cue-to-event assignments.
+- `cues-only` - Downloads `<filename>_macro.xml`; macro creates sequences, cues, appearances, and page assignments but omits timecode commands.
 
 ## CSV input expectations
 
@@ -147,7 +151,7 @@ This means spaces, digits, underscores, hyphens, accents, and uppercase `.CSV` e
 
 Marker names are sanitized by `safeName()`:
 
-- Allowed: ASCII letters/digits, German umlauts and sharp-s, spaces, hyphen, underscore, `#`, `%`, `/`, parentheses, brackets, `=`, `+`.
+- Allowed: ASCII letters/digits, Latin accented letters, spaces, hyphen, underscore, `#`, `%`, `/`, parentheses, brackets, `=`, `+`.
 - Removed: quotes, angle brackets, most punctuation, emoji, and other special characters.
 
 Duplicate marker names are counted globally after sanitization:
@@ -156,38 +160,37 @@ Duplicate marker names are counted globally after sanitization:
 - Later occurrences receive numeric suffixes in chronological order, for example `SD`, `SD 2`, `SD 3`.
 - This applies before splitting unique and repeated markers, so duplicate behavior is shared across both categories.
 
-This naming matters because generated grandMA3 commands embed names in quoted command strings and timecode object paths.
+This naming matters because generated grandMA3 commands embed names in labels and quoted command strings.
 
 Bracket tags are parsed from leading or trailing `[]` blocks:
 
 - Leading blocks can carry metadata like `BPM_129.5`, `CueFade_6/12`, `FadeFromX_0.5`, or `Temp`.
 - Trailing blocks can override the execution token, for example `Intro [Go+]`.
 - Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, and `Flash`.
-- Cue timing tags are emitted on the generated macro line as `Set Sequence ... Cue "..." Part 0.1 ...`.
+- Cue timing tags are emitted on the generated macro line as `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...`.
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
-- Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to `Goto|Go+` on the target region sequence cue 1. `OFF` maps to `Off Sequence` on the target region sequence. If both are present, `OFF` is emitted before `ON`.
+- Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to cue 1 on the target region track. `OFF` maps to an `Off` event on the target region track without cue assignment. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.
 
 ## Unique cue behavior
 
 Rows with empty `Color` are considered normal cues in the master sequence.
 
-Macro XML for unique cues:
+Macro commands for unique cues:
 
-- Stores cue range in the base sequence: `Store Sequence {sequenceNumber} Cue {cueStartNumber} thru {lastCueNumber}`.
-- Labels each cue in order: `Label Sequence {sequenceNumber} Cue {cueNumber} "{name}"`.
+- Creates the base sequence in a temporary DataPool as a local sequence, then moves it to `Sequence {sequenceNumber}` at the end.
+- Stores the cue range in the local sequence: `Store DataPool "{temp}" Sequence {local} Cue {cueStartNumber} Thru {lastCueNumber} /Merge`.
+- Labels each cue in order: `Label DataPool "{temp}" Sequence {local} Cue {cueNumber} "{name}"`.
 - If present, `CueFade` and cue timing tags are applied after the cue is labeled.
 - Cue numbers start at `cueStartNumber`.
 - A marker without a label gets a fallback cue name like `Cue 1`.
 
-Timecode XML for unique cues:
+Timecode commands for unique cues:
 
-- Creates one track targeting `ShowData.DataPools.Default.Sequences.Sequence {sequenceNumber}`.
-- Adds one `CmdEvent` per unique cue.
-- Each event has `ExecToken="Goto"`.
-- The destination is `ShowData.DataPools.Default.Sequences.Sequence {sequenceNumber}.{cueName}`.
-- The first event also sets the `Object` attribute to the target sequence.
+- Creates one timecode track for the local base sequence.
+- Adds one command event per unique cue with `Set {event} "TIME" "{Start}"` and `Set {event} "TOKEN" "{execToken}"`.
+- Assigns each cue to its event with `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.1.{track}.1.1.{event}`.
 
-Risk: if there are zero unique cues, the macro store command becomes a range like `Cue 1 thru 0`. If all markers are colored, this may create invalid grandMA3 behavior.
+If there are zero unique cues, the macro omits base-sequence store, speed, label, fade, and timing commands instead of creating an invalid range like `Cue 1 thru 0`.
 
 ## Repeated sequence behavior
 
@@ -204,25 +207,23 @@ Grouping rules:
 - If a cue name already exists in that repeated sequence, the cue is reused instead of duplicated.
 - In hybrid mode, region sequences consume the sequence numbers immediately after the main sequence, before repeated, bump, and BPM sequences.
 
-Macro XML for repeated sequences:
+Macro commands for repeated sequences:
 
-- Stores a sequence with a name: `Store Sequence {repeatedSequenceNumber} "{prefix} - {name}"`.
-- Stores cue 1 in that sequence with `/Merge`.
+- Creates each repeated sequence in the temporary DataPool with a local sequence number.
+- Stores cue ranges in that local sequence with `/Merge`.
 - Sets the OffCue trigger type to `Follow`.
 - Assigns a grandMA3 appearance per distinct Reaper color.
 - Applies `CueFade` and cue timing tags to the created cues when present.
 - Region sequences use the same appearance flow when the region row has a color, and region cues can get their own cue-level appearance when the marker color differs from the region color.
+- Appearance color conversion supports decimal Reaper color values, `0x...`, `#RRGGBB`, and six-digit hex values that contain A-F characters such as `F2FF00`.
 
-Timecode XML for repeated sequences:
+Timecode commands for repeated sequences:
 
-- Creates a second track group.
-- Adds one track per repeated sequence.
-- Each track targets `ShowData.DataPools.Default.Sequences.{sequenceName}`.
-- Each timestamp becomes a `Goto` event to `{sequenceName}.Cue 1`.
-- The first timestamp event for each repeated sequence sets the `Object` attribute.
-- Random GUID-like byte strings are generated for repeated sequence tracks and time ranges.
+- Adds one track per generated sequence.
+- Each timestamp becomes a command event on that sequence's track.
+- Each cue-triggering event is connected with `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.1.{track}.1.1.{event}`.
 
-Risk: sequence target paths for repeated sequences use raw sequence names in the object path, for example `ShowData.DataPools.Default.Sequences.1 - SD`. That appears intentional in current code, but any naming changes should be tested against grandMA3 import behavior.
+Risk: sequence names are still embedded in labels and command strings. Any naming changes should be tested against grandMA3 import behavior.
 
 ## grandMA3 XML generation
 
@@ -240,7 +241,7 @@ All generated files start with:
 <?xml version="1.0" encoding="UTF-8"?>
 ```
 
-The generated root is `GMA3` with `DataVersion="1.4.0.2"` for the CSV conversion flow.
+The generated root is `GMA3`. CSV conversion output is now always a macro XML wrapper using `DataVersion="1.4.0.2"`. It no longer emits a separate `GMA3.Timecode` object XML file.
 
 The repository also includes standalone macro-library examples in `example/macro/*.xml`. Those files use `DataVersion="2.4.2.2"` and a simpler single-macro structure. Any new standalone macro-library generator should follow that macro-library convention while leaving the CSV conversion XML unchanged.
 
@@ -250,31 +251,30 @@ Macro specifics:
 - Macro name is `Macro {filename}`.
 - Macro GUID is currently hardcoded.
 - Every macro line waits `0.10`.
+- The macro starts with `cd root`, deletes any existing temporary DataPool named `R2MA {filename}`, then stores a fresh one.
+- Generated sequences are created as local `Sequence 1..N` inside the temporary DataPool.
 - Every created sequence gets the configured Speed Master assignment.
+- If the base sequence has no unique cues, base-sequence macro lines are skipped to avoid `Cue 1 thru 0`.
 - In hybrid mode, region sequences are stored like regular sequences and their marker cues get labeled, timed, and optionally assigned appearances.
-- In `cues-and-timecode` mode, the macro runs `Drive {driveNumber}` and `import Timecode "{filename}_timecode"`.
-- Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} "Color" "r,g,b,a"`, then `Assign Appearance "{name}" at Sequence {sequenceNumber}`.
-- Cue-level appearances use `Assign Appearance "{name}" at Sequence {sequenceNumber} Cue {cueNumber}`.
+- Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} COLOR="1,1,1,0" BackR={0..255} BackG={0..255} BackB={0..255} BackAlpha=221`, then `Set DataPool "{temp}" Sequence {local} APPEARANCE="{name}"`.
+- Cue-level appearances use `Set DataPool "{temp}" Sequence {local} Cue {cueNumber} APPEARANCE="{name}"`.
 - BPM markers create a dedicated sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`.
+- Generated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}`.
+- The macro finalizes with `Move DataPool "{temp}" Sequence 1 Thru At Sequence {firstFinalSequenceNumber}`, optional timecode move, and `Delete DataPool "{temp}" /NoConfirm`.
 
-Timecode specifics:
+Command-driven timecode specifics:
 
-- Root object is `GMA3.Timecode`.
-- Timecode name is `{filename}`.
-- Main timecode GUID is currently hardcoded.
-- Cursor is `00.00`.
-- LoopCount is `0`.
-- TCSlot is `-1`.
-- SwitchOff is `Keep Playbacks`.
-- Timedisplayformat is `<10d11h23m45>`.
-- FrameReadout is `<Seconds>`.
-- Hybrid exports create a dedicated region track group ahead of the repeated and bump groups.
-- BPM markers create a dedicated BPM track in the timecode export.
-- Bump overlays get their own track group separate from music sequences.
+- In `cues-and-timecode` mode, the macro stores `DataPool "{temp}" Timecode 1`, creates a track per generated sequence, then moves it to `Timecode {timecodeNumber}`.
+- It uses the CuePoints-style command pattern: `Assign DataPool "{temp}" Sequence {local} At {track}`, `Store Type "CmdSubTrack" 1`, `Store {event}`, `Set {event} "TIME" "{Start}"`, and `Set {event} "TOKEN" "{execToken}"`.
+- Cue-to-event connections use `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.1.{track}.1.1.{event}`.
+- `OFF_Rx` creates an `Off` event on the target region track without cue assignment.
+- `ON_Rx` creates a `Goto|Go+` event on the target region track assigned to cue 1.
+- Event timestamps stay in the CSV's seconds string format. Duration is still calculated from the latest generated timestamp plus one second.
+- The generator does not emit an audio track, fader subtracks, `RealtimeCmd`, `CueDestination`, `ValCueDestination`, or grandMA internal object/cue numeric IDs.
 
-Potential issue: timecode duration is based only on the last unique cue start plus one second. Repeated sequence timestamps are ignored. If the last event is a colored/repeated marker after the last uncolored marker, the generated timecode duration can be too short.
+Current behavior: timecode duration is calculated from the latest timestamp across unique cues, region cues, repeated sequence triggers, bump overlays, and BPM events, plus one second. A unit test now covers a hybrid CSV where the latest event is not a main-sequence cue.
 
-Potential issue: static macro/timecode GUIDs may cause collisions or overwrite/update behavior when multiple generated files are imported into the same grandMA3 environment. Repeated tracks use random GUIDs, but the top-level macro and timecode objects do not.
+Potential issue: the macro GUID is static, which may affect import/update behavior when multiple generated files are imported into the same grandMA3 environment. The timecode object is created by command and does not use a generated XML GUID.
 
 ## Demo project findings
 
@@ -297,7 +297,7 @@ The UI is a single page with:
 
 - Header/title and subtitle.
 - Upload/drop zone.
-- Settings grid for sequence number, prefix, import mode, and drive number.
+- Settings grid for sequence number, prefix, import mode, timecode number, page number, and page slot start.
 - Collapsible advanced section for cue start number.
 - Radio group for import mode and export mode.
 - Static instructions.
@@ -315,7 +315,6 @@ Notable UI details:
 
 Issues to watch:
 
-- Both the drive number input and cue start input use `id="drive-number"`, which creates duplicate IDs and mislabels the advanced cue start field.
 - Drag/drop assigns `fileInput.files = files`, which works in some browsers but can be fragile because `FileList` assignment support varies historically.
 - Error display is generic. Actual parse errors are only logged to `console.error`.
 - `alert("Please select a CSV file")` is used for non-CSV drops.
@@ -364,12 +363,12 @@ Generated/installed artifacts are ignored by git:
 High-value maintenance improvements:
 
 1. Extract CSV parsing and XML generation from `src/routes/+page.svelte` into a typed `$lib` module. This would make the conversion logic testable without browser/file APIs.
-2. Add fixtures for small Reaper CSV examples and snapshot or structural tests for generated macro/timecode XML.
+2. Add fixtures for small Reaper CSV examples and snapshot or structural tests for generated macro XML commands.
 3. Fix CI to use pnpm and the checked-in lockfile.
 4. Add explicit CSV header validation and helpful user-facing parse errors.
-5. Compute timecode duration from the maximum timestamp across both unique cues and repeated sequence timestamps.
-6. Decide whether top-level macro/timecode GUIDs should be generated rather than static.
-7. Fix duplicate input IDs in the settings UI.
+5. Keep regression coverage for timecode duration across unique, region, repeated, bump, and BPM events.
+6. Decide whether the top-level macro GUID should be generated rather than static.
+7. Add grandMA import validation coverage for command-driven timecode creation.
 8. Improve filename normalization for uppercase `.CSV`, digits, spaces, and non-ASCII names if user-friendly output names matter.
 9. Handle the all-colored-marker case explicitly instead of generating a potentially invalid unique cue store range.
 10. Consider replacing `alert()` with an inline error state.
@@ -383,6 +382,6 @@ Lower-priority cleanup:
 
 ## Agent conclusions
 
-Future agents should treat this as a specialized conversion utility, not a generic file converter. Most code changes should preserve the current distinction between uncolored markers as master cues and colored markers as repeated/effect sequences. Any change touching marker names, sequence paths, cue destinations, GUIDs, or timecode duration should be validated with realistic Reaper CSV fixtures and, ideally, imported into grandMA3 or checked against known-good XML.
+Future agents should treat this as a specialized conversion utility, not a generic file converter. Most code changes should preserve the current distinction between uncolored markers as master cues and colored markers as repeated/effect sequences. Any change touching marker names, sequence numbering, command destinations, GUIDs, or timecode duration should be validated with realistic Reaper CSV fixtures and, ideally, imported into grandMA3 or checked against known-good macro command XML.
 
 The app is small enough to work in directly, but the conversion logic has enough domain specificity that tests should be introduced before broad refactors. The safest next structural move is to move the conversion functions into `$lib/conversion.ts`, keep the UI behavior unchanged, and add fixture-based tests around that module.

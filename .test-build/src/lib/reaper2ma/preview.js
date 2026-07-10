@@ -11,7 +11,7 @@ export function createConversionPreview(artifacts, sourceMarkerCount) {
     const appearanceCount = collectAppearanceNumbers(artifacts).size;
     const warnings = [];
     if (artifacts.uniqueCues.length === 0) {
-        warnings.push("La séquence principale est vide: un CSV entièrement coloré peut produire un range invalide.");
+        warnings.push("La séquence principale est vide: aucun cue ne sera créé dans la séquence de base.");
     }
     if (artifacts.importMode === "regions-and-markers" && artifacts.regionSequences.length === 0) {
         warnings.push("Le mode régions a été sélectionné mais aucun region valide n'a été trouvé dans le CSV.");
@@ -31,10 +31,7 @@ export function createConversionPreview(artifacts, sourceMarkerCount) {
         appearanceCount,
         duration: calculateTimecodeDuration(timestamps),
         generatedSequenceNames,
-        outputFileNames: [
-            buildOutputFileName(artifacts.outputBaseName, "macro"),
-            ...(artifacts.timecodeXml ? [buildOutputFileName(artifacts.outputBaseName, "timecode")] : []),
-        ],
+        outputFileNames: [buildOutputFileName(artifacts.outputBaseName, "macro")],
         warnings,
     };
 }

@@ -3,7 +3,7 @@ import * as csv from "@vanillaes/csv";
 import type { ConvertedMarker, MarkerTag, ReaperMarkerRow, RegionActionTag } from "./types.js";
 import { createDefaultMarkerTagProviderRegistry } from "./providers/registry.js";
 
-const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
+const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9À-ÖØ-öø-ÿĀ-ſ \-_#%\/\(\)\[\]=+]/g;
 const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]\s*$/;
 const CANONICAL_EXECUTION_TOKENS: Record<string, string> = {
     "go+": "Go+",
@@ -16,6 +16,7 @@ const CANONICAL_EXECUTION_TOKENS: Record<string, string> = {
     temp: "Temp",
     flash: "Flash",
 };
+const GLOBAL_SCOPE_TAGS = new Set(["GLOBAL", "MAIN"]);
 
 const markerTagProviderRegistry = createDefaultMarkerTagProviderRegistry();
 
@@ -23,6 +24,7 @@ type ParsedMarkerName = {
     displayName: string;
     execToken: string;
     tags: MarkerTag[];
+    isGlobal?: boolean;
     regionActions?: RegionActionTag[];
     cueTiming?: NonNullable<ConvertedMarker["cueTiming"]>;
     bpm?: number;
@@ -31,7 +33,7 @@ type ParsedMarkerName = {
 };
 
 export function sanitizeMarkerName(name: string): string {
-    return name.replace(SAFE_MARKER_NAME_PATTERN, "");
+    return name.normalize("NFC").replace(SAFE_MARKER_NAME_PATTERN, "");
 }
 
 export function parseMarkerName(name: string): ParsedMarkerName {
@@ -41,12 +43,14 @@ export function parseMarkerName(name: string): ParsedMarkerName {
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
     const regionActions = extractRegionActions(tags);
     const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag)));
-    const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Goto";
+    const isGlobal = tags.some(isGlobalScopeTag);
+    const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
 
     return {
         displayName,
         execToken,
         tags,
+        ...(isGlobal ? { isGlobal } : {}),
         ...(regionActions.length > 0
             ? {
                   regionActions,
@@ -117,6 +121,7 @@ export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] 
             displayName: marker.displayName,
             execToken: marker.execToken,
             tags: markerTags,
+            ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
             ...(marker.regionActions && marker.regionActions.length > 0
                 ? {
                       regionActions: marker.regionActions,
@@ -300,6 +305,14 @@ function isRegionActionTag(tag: MarkerTag): boolean {
     const key = tag.key.trim().toUpperCase();
 
     return key === "ON" || key === "OFF";
+}
+
+function isGlobalScopeTag(tag: MarkerTag): boolean {
+    if (tag.value !== null) {
+        return false;
+    }
+
+    return GLOBAL_SCOPE_TAGS.has(tag.key.trim().toUpperCase());
 }
 
 function extractRegionActions(tags: MarkerTag[]): RegionActionTag[] {

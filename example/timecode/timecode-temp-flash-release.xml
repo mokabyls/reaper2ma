@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.3.1.1">
+    <Timecode Guid="4A 31 60 18 E8 52 E1 5E B6 D0 AA BC 67 C9 7F EB" Cursor="31.40" Duration="31.40" LoopMode="Loop" LoopCount="0" TCSlot="-1" AutoStop="No" SwitchOff="Keep Playbacks" Goto="as Go" PlaybackandRecord="All Events" TimeDisplayFormat="Default" FrameReadout="Default">
+        <TrackGroup Play="" Rec="">
+            <MarkerTrack Name="Marker" Guid="4A 31 60 18 50 81 47 75 F4 F8 1D DA A6 7A 51 EA"/>
+            <Track Name="Default" Guid="4A 31 60 18 4F 11 52 17 A9 7F 06 DF A2 7A 51 EA" Target="ShowData.DataPools.Default.Sequences.Default" Play="" Rec="">
+                <TimeRange Guid="4A 31 60 18 69 48 3E 34 5E 06 EF E3 A3 7A 51 EA" Duration="To End" Play="" Rec="">
+                    <CmdSubTrack>
+                        <CmdEvent Name="Temp" Time="10.667" CueDestination="Cue 1">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" User="1" Status="On" IsRealtime="1" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="1" IgnoreExecXFade="0" IsExecXFade="0" Object="13.13.0.5.0" ExecToken="Temp" ValCueDestination="0.5.0.1000"/>
+                        </CmdEvent>
+                        <CmdEvent Name="Temp(Release)" Time="14.250" CueDestination="Cue 1">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" User="1" Status="Off" IsRealtime="1" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="1" IgnoreExecXFade="0" IsExecXFade="0" Object="13.13.0.5.0" ExecToken="Temp" ValCueDestination="0.5.0.1000"/>
+                        </CmdEvent>
+                        <CmdEvent Name="Temp" Time="6.283" CueDestination="Cue 1">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" User="1" Status="On" IsRealtime="1" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="1" IgnoreExecXFade="0" IsExecXFade="0" Object="13.13.0.5.0" ExecToken="Temp" ValCueDestination="0.5.0.1000"/>
+                        </CmdEvent>
+                        <CmdEvent Name="Temp(Release)" Time="6.383" CueDestination="Cue 1">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" User="1" Status="Off" IsRealtime="1" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="1" IgnoreExecXFade="0" IsExecXFade="0" Object="13.13.0.5.0" ExecToken="Temp" ValCueDestination="0.5.0.1000"/>
+                        </CmdEvent>
+                        <CmdEvent Name="Flash" Time="26.467">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" User="1" Status="On" IsRealtime="1" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="1" IgnoreExecXFade="0" IsExecXFade="0" Object="13.13.0.5.0" ExecToken="Flash" ValFadeTime="0.00"/>
+                        </CmdEvent>
+                        <CmdEvent Name="Flash(Release)" Time="26.650">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" User="1" Status="Off" IsRealtime="1" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" FromLocalHardwareFader="1" IgnoreExecXFade="0" IsExecXFade="0" Object="13.13.0.5.0" ExecToken="Flash" ValFadeTime="0.00"/>
+                        </CmdEvent>
+                    </CmdSubTrack>
+                </TimeRange>
+            </Track>
+        </TrackGroup>
+    </Timecode>
+</GMA3>

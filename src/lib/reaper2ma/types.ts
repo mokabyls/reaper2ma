@@ -12,6 +12,25 @@ export type MarkerTag = {
     value: string | null;
 };
 
+export type CueTimingTagKey =
+    | "FadeFromX"
+    | "FadeFromY"
+    | "FadeFromZ"
+    | "FadeToX"
+    | "FadeToY"
+    | "FadeToZ"
+    | "DelayFromX"
+    | "DelayFromY"
+    | "DelayFromZ"
+    | "DelayToX"
+    | "DelayToY"
+    | "DelayToZ";
+
+export type CueTimingTag = {
+    key: CueTimingTagKey;
+    value: string;
+};
+
 export type ConvertedMarker = {
     displayName: string;
     execToken: string;
@@ -21,12 +40,14 @@ export type ConvertedMarker = {
     bpm?: number;
     bpmText?: string;
     cueFade?: string;
+    cueTiming?: CueTimingTag[];
 };
 
 export type SequenceCue = {
     cueNumber: number;
     name: string;
     cueFade?: string;
+    cueTiming?: CueTimingTag[];
 };
 
 export type SequenceTrigger = {
@@ -35,6 +56,7 @@ export type SequenceTrigger = {
     cueNumber: number;
     cueName: string;
     cueFade?: string;
+    cueTiming?: CueTimingTag[];
 };
 
 export type RepeatedSequence = {
@@ -76,6 +98,47 @@ export type ConversionSettings = {
     speedMaster: string;
     prefix: string;
     exportMode: ExportMode;
+};
+
+export type ExampleMacroPresetGroupId = "show-time" | "timecode-control";
+
+export type ExampleMacroPresetId =
+    | "show-time-manuel"
+    | "show-time-auto-restore"
+    | "timecode-switch-int"
+    | "timecode-switch-ltc"
+    | "timecode-rewind-and-switch-int"
+    | "timecode-rewind-tc-and-switch-ltc";
+
+export type ExampleMacroPresetSelection = {
+    showTime: boolean;
+    timecodeControl: boolean;
+};
+
+export type ExampleMacroPresetContext = {
+    timecodeName: string;
+};
+
+export type ExampleMacroPresetDefinition = {
+    id: ExampleMacroPresetId;
+    groupId: ExampleMacroPresetGroupId;
+    label: string;
+    xmlName: string;
+    fileBaseName: string;
+    lines: Array<string | ((context: ExampleMacroPresetContext) => string)>;
+};
+
+export type ExampleMacroPresetGroup = {
+    id: ExampleMacroPresetGroupId;
+    label: string;
+    description: string;
+    presets: ExampleMacroPresetDefinition[];
+};
+
+export type ExampleMacroPresetOutputFile = {
+    name: string;
+    content: string;
+    presetId: ExampleMacroPresetId;
 };
 
 export type ConversionArtifacts = {

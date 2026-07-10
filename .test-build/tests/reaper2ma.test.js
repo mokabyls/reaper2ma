@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { XMLParser } from "fast-xml-parser";
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
 import { convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
+import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
+import { createReaperTransportMacroOutputFile, generateReaperTransportMacros } from "../src/lib/reaper2ma/transport-macros.js";
+import { bpmTagProvider } from "../src/lib/reaper2ma/providers/bpm.js";
+import { cueFadeTagProvider } from "../src/lib/reaper2ma/providers/cue-fade.js";
+import { createDefaultMarkerTagProviderRegistry } from "../src/lib/reaper2ma/providers/registry.js";
+import { delayFromTagProvider } from "../src/lib/reaper2ma/providers/delay-from.js";
+import { delayToTagProvider } from "../src/lib/reaper2ma/providers/delay-to.js";
+import { fadeFromTagProvider } from "../src/lib/reaper2ma/providers/fade-from.js";
+import { fadeToTagProvider } from "../src/lib/reaper2ma/providers/fade-to.js";
 import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseMarkerName, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
 const baseSettings = {
     sequenceNumber: 101,
@@ -15,6 +25,17 @@ const baseSettings = {
     exportMode: "cues-and-timecode",
 };
 const fixtureCsv = readFileSync(new URL("../../tests/fixtures/basic.csv", import.meta.url), "utf8");
+const transportMacroFixture = readFileSync(new URL("../../tests/fixtures/reaper-transport-macros.default.xml", import.meta.url), "utf8");
+const xmlParser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "@_",
+    removeNSPrefix: false,
+    parseTagValue: false,
+    parseAttributeValue: false,
+});
+function parseXml(xml) {
+    return xmlParser.parse(xml);
+}
 describe("marker normalization", () => {
     it("preserves allowed marker characters and removes unsupported ones", () => {
         assert.equal(sanitizeMarkerName('Crash! "Main" / Intro'), "Crash Main / Intro");
@@ -73,6 +94,27 @@ describe("marker normalization", () => {
             execToken: "Flash",
             tags: [],
         });
+        assert.deepEqual(parseMarkerName("[FadeFromX_0.5|FadeToX_1.2|DelayFromY_0.25|DelayToZ_2] Intro"), {
+            displayName: "Intro",
+            execToken: "Goto",
+            tags: [
+                { key: "FADEFROMX", value: "0.5" },
+                { key: "FADETOX", value: "1.2" },
+                { key: "DELAYFROMY", value: "0.25" },
+                { key: "DELAYTOZ", value: "2" },
+            ],
+            cueTiming: [
+                { key: "FadeFromX", value: "0.5" },
+                { key: "FadeToX", value: "1.2" },
+                { key: "DelayFromY", value: "0.25" },
+                { key: "DelayToZ", value: "2" },
+            ],
+        });
+        assert.deepEqual(parseMarkerName("[FadeFromA_0.5] Intro"), {
+            displayName: "Intro",
+            execToken: "Goto",
+            tags: [{ key: "FADEFROMA", value: "0.5" }],
+        });
     });
     it("ignores invalid BPM metadata and keeps exporting", () => {
         const markers = normalizeMarkerRows([
@@ -90,6 +132,28 @@ describe("marker normalization", () => {
         const marker = parseMarkerName("[CueFade_] Intro");
         assert.equal(marker.cueFade, undefined);
         assert.deepEqual(marker.tags, [{ key: "CUEFADE", value: null }]);
+    });
+    it("routes metadata through dedicated providers by family", () => {
+        const registry = createDefaultMarkerTagProviderRegistry();
+        assert.equal(fadeFromTagProvider.supports({ key: "FADEFROMX", value: "0.5" }), true);
+        assert.equal(fadeFromTagProvider.supports({ key: "FADETOX", value: "0.5" }), false);
+        assert.equal(fadeToTagProvider.supports({ key: "FADETOZ", value: "1.2" }), true);
+        assert.equal(delayFromTagProvider.supports({ key: "DELAYFROMY", value: "0.25" }), true);
+        assert.equal(delayToTagProvider.supports({ key: "DELAYTOZ", value: "2" }), true);
+        assert.equal(cueFadeTagProvider.supports({ key: "CUEFADE", value: "6/12" }), true);
+        assert.equal(bpmTagProvider.supports({ key: "BPM", value: "129.5" }), true);
+        assert.deepEqual(registry.enrich([{ key: "FADEFROMX", value: "0.5" }]), {
+            cueTiming: [{ key: "FadeFromX", value: "0.5" }],
+        });
+        assert.deepEqual(registry.enrich([{ key: "CUEFADE", value: "6/12" }]), {
+            cueTiming: [],
+            cueFade: "6/12",
+        });
+        assert.deepEqual(registry.enrich([{ key: "BPM", value: "129.5" }]), {
+            cueTiming: [],
+            bpm: 129.5,
+            bpmText: "129.5",
+        });
     });
     it("preserves sanitized marker names before sequence-local dedupe", () => {
         const markers = normalizeMarkerRows([
@@ -210,6 +274,45 @@ describe("conversion artifacts", () => {
         const outputFiles = createConversionOutputFiles(artifacts);
         assert.deepEqual(outputFiles.map((file) => file.name), ["songcsv_macro.xml", "songcsv_timecode.xml"]);
     });
+    it("creates standalone example macro exports by group with a CSV filename fallback", () => {
+        const outputFiles = createExampleMacroPresetOutputFiles({
+            sourceFileName: "odyssees-erin.csv",
+            timecodeName: "",
+            selection: {
+                showTime: true,
+                timecodeControl: false,
+            },
+        });
+        assert.deepEqual(outputFiles.map((file) => file.name), ["show-time-manuel.xml", "show-time-auto-restore.xml"]);
+        assert.equal(outputFiles[0].content.includes('Macro Name="SHOW TIME MANUEL"'), true);
+        assert.equal(outputFiles[0].content.includes('Off Timecode &quot;odyssees-erin&quot;'), true);
+        assert.equal(outputFiles[0].content.includes('Macro &quot;RESET&quot;'), false);
+        assert.equal(outputFiles[1].content.includes('Macro Name="SHOW TIME AUTO RESTORE"'), true);
+        assert.equal(outputFiles[1].content.includes('Go+ Timecode &quot;odyssees-erin&quot;'), true);
+    });
+    it("creates the timecode control macro presets independently", () => {
+        const outputFiles = createExampleMacroPresetOutputFiles({
+            sourceFileName: "show.csv",
+            timecodeName: "custom-timecode",
+            selection: {
+                showTime: false,
+                timecodeControl: true,
+            },
+        });
+        assert.deepEqual(outputFiles.map((file) => file.name), [
+            "timecode-switch-int.xml",
+            "timecode-switch-ltc.xml",
+            "timecode-rewind-and-switch-int.xml",
+            "timecode-rewind-tc-and-switch-ltc.xml",
+        ]);
+        assert.equal(outputFiles[0].content.includes('Macro Name="Timecode Switch INT"'), true);
+        assert.equal(outputFiles[0].content.includes('Set Timecode &quot;custom-timecode&quot; &quot;TCSlot&quot; -2'), true);
+        assert.equal(outputFiles[2].content.includes('Pause Timecode &quot;custom-timecode&quot;'), true);
+    });
+    it("resolves the example macro timecode name from the CSV basename when blank", () => {
+        assert.equal(resolveExampleMacroTimecodeName("", "Pecherie 2023.csv"), "Pecherie 2023");
+        assert.equal(resolveExampleMacroTimecodeName("manual-name", "Pecherie 2023.csv"), "manual-name");
+    });
     it("omits the timecode export in cues-only mode", () => {
         const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "demo.csv", {
             ...baseSettings,
@@ -310,6 +413,25 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Hit&quot; CueFade 3/"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Cue &quot;Start&quot; CueFade *2"'), true);
     });
+    it("emits cue timing modifiers for repeated and bump cues", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,0,
+2,[FadeFromX_0.5|FadeToX_1.2] Verse,1,19005190
+3,[FadeFromX_1.5|DelayToZ_2] Hit,2,19005190
+4,[Temp|FadeFromY_0.25|DelayFromY_0.75] Flash,3,19005190
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "cue-timing.csv", baseSettings);
+        assert.equal(artifacts.repeatedSequences[0].cues[0].cueTiming?.[0].key, "FadeFromX");
+        assert.equal(artifacts.repeatedSequences[0].cues[0].cueTiming?.[0].value, "0.5");
+        assert.equal(artifacts.repeatedSequences[0].cues[0].cueTiming?.[1].key, "FadeToX");
+        assert.equal(artifacts.repeatedSequences[0].cues[1].cueTiming?.[0].key, "FadeFromX");
+        assert.equal(artifacts.repeatedSequences[0].cues[1].cueTiming?.[1].key, "DelayToZ");
+        assert.equal(artifacts.bumpSequences[0].cues[0].cueTiming?.[0].key, "FadeFromY");
+        assert.equal(artifacts.bumpSequences[0].cues[0].cueTiming?.[1].key, "DelayFromY");
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Start&quot; Part 0.1 FadeFromX &quot;0.5&quot; FadeToX &quot;1.2&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 102 Cue &quot;Hit&quot; Part 0.1 FadeFromX &quot;1.5&quot; DelayToZ &quot;2&quot;"'), true);
+        assert.equal(artifacts.macroXml.includes('Command="Set Sequence 103 Cue &quot;Start&quot; Part 0.1 FadeFromY &quot;0.25&quot; DelayFromY &quot;0.75&quot;"'), true);
+    });
     it("ignores invalid BPM tags without creating a BPM sequence", () => {
         const csv = `#,Name,Start,Color
 1,[BPM_bad] Intro,0,
@@ -341,6 +463,94 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.macroXml.includes('Command="Store Sequence 104 &quot;1 - Intro - BUMP - HIT&quot;"'), true);
         assert.equal(artifacts.macroXml.includes('Command="Store Sequence 105 &quot;1 - Verse - BUMP - HIT&quot;"'), true);
         assert.equal(artifacts.timecodeXml?.includes('ShowData.DataPools.Default.Sequences.1 - Intro - BUMP - HIT.Start'), true);
+    });
+});
+describe("reaper transport macro library", () => {
+    it("matches the default fixture output", () => {
+        const xml = generateReaperTransportMacros();
+        assert.equal(xml, transportMacroFixture);
+    });
+    it("creates a valid macro library with the expected macro order and commands", () => {
+        const xml = generateReaperTransportMacros();
+        const parsed = parseXml(xml);
+        const macros = Array.isArray(parsed.GMA3.Macro) ? parsed.GMA3.Macro : [parsed.GMA3.Macro];
+        assert.equal(parsed.GMA3["@_DataVersion"], "2.4.2.2");
+        assert.equal(macros.length, 8);
+        assert.deepEqual(macros.map((macro) => macro["@_Name"]), [
+            "REAPER - REWIND",
+            "REAPER - PLAY",
+            "REAPER - PAUSE",
+            "REAPER - STOP",
+            "REAPER - NEXT MARKER",
+            "REAPER - PREV MARKER",
+            "REAPER - NEXT REGION",
+            "REAPER - PREV REGION",
+        ]);
+        assert.deepEqual(macros.map((macro) => {
+            const lines = Array.isArray(macro.MacroLine) ? macro.MacroLine : [macro.MacroLine];
+            return lines.map((line) => line["@_Command"]);
+        }), [
+            ['SendOSC 1 "/action,i,40042"'],
+            ['SendOSC 1 "/play,i,1"'],
+            ['SendOSC 1 "/pause,i,1"'],
+            ['SendOSC 1 "/stop,i,1"'],
+            ['SendOSC 1 "/action,i,40173"'],
+            ['SendOSC 1 "/action,i,40172"'],
+            ['SendOSC 1 "/ma3/region/next,i,1"'],
+            ['SendOSC 1 "/ma3/region/previous,i,1"'],
+        ]);
+        assert.equal(xml.includes("record"), false);
+        assert.equal(xml.includes("/record"), false);
+        assert.equal(xml.includes("REC"), false);
+        assert.equal(xml.includes("&quot;/play,i,1&quot;"), true);
+        assert.equal(xml.includes("&quot;/ma3/region/previous,i,1&quot;"), true);
+        assert.equal(macros.every((macro) => {
+            const lines = Array.isArray(macro.MacroLine) ? macro.MacroLine : [macro.MacroLine];
+            return lines.length === 1 && Boolean(lines[0]["@_Guid"]) && Boolean(lines[0]["@_Command"]);
+        }), true);
+    });
+    it("supports custom slot ids and display names without changing the command payload", () => {
+        const defaultXml = generateReaperTransportMacros();
+        const oscDataNameOnlyXml = generateReaperTransportMacros({
+            oscDataName: "AUDIO_REAPER",
+        });
+        const customXml = generateReaperTransportMacros({
+            oscSlotId: 3,
+            oscDataName: "AUDIO_REAPER",
+            macroNamePrefix: "AUDIO_REAPER - ",
+            outputFileName: "audio_reaper_macros.xml",
+        });
+        assert.equal(oscDataNameOnlyXml, defaultXml);
+        assert.equal(customXml.includes('SendOSC 3 &quot;/play,i,1&quot;'), true);
+        assert.equal(customXml.includes('SendOSC 3 &quot;/action,i,40042&quot;'), true);
+        assert.equal(customXml.includes("AUDIO_REAPER - PLAY"), true);
+        assert.equal(defaultXml.includes("AUDIO_REAPER - PLAY"), false);
+        assert.notEqual(customXml, defaultXml);
+    });
+    it("is deterministic for repeated generations with the same options", () => {
+        const first = generateReaperTransportMacros({
+            oscSlotId: 3,
+            oscDataName: "AUDIO_REAPER",
+            macroNamePrefix: "AUDIO_REAPER - ",
+        });
+        const second = generateReaperTransportMacros({
+            oscSlotId: 3,
+            oscDataName: "AUDIO_REAPER",
+            macroNamePrefix: "AUDIO_REAPER - ",
+        });
+        assert.equal(first, second);
+    });
+    it("rejects invalid slot ids", () => {
+        assert.throws(() => generateReaperTransportMacros({ oscSlotId: 0 }), /positive integer/);
+        assert.throws(() => generateReaperTransportMacros({ oscSlotId: -1 }), /positive integer/);
+        assert.throws(() => generateReaperTransportMacros({ oscSlotId: 1.25 }), /positive integer/);
+    });
+    it("creates an output file wrapper with the configured filename", () => {
+        const output = createReaperTransportMacroOutputFile({
+            outputFileName: "custom.xml",
+        });
+        assert.equal(output.name, "custom.xml");
+        assert.equal(output.content, generateReaperTransportMacros({ outputFileName: "custom.xml" }));
     });
 });
 //# sourceMappingURL=reaper2ma.test.js.map

@@ -1,5 +1,18 @@
 <script lang="ts">
-    import { convertReaperCsvToArtifacts, createConversionOutputFiles, downloadTextFile, type ConversionSettings, type ExportMode } from "$lib/reaper2ma/index.js";
+    import {
+        convertReaperCsvToArtifacts,
+        createReaperTransportMacroOutputFile,
+        createConversionOutputFiles,
+        createExampleMacroPresetOutputFiles,
+        downloadTextFile,
+        exampleMacroPresetGroups,
+        resolveExampleMacroTimecodeName,
+        stripFileExtension,
+        type ConversionSettings,
+        type ExportMode,
+        type ExampleMacroPresetSelection,
+        type ReaperMacroGeneratorOptions,
+    } from "$lib/reaper2ma/index.js";
 
     let fileInput: HTMLInputElement;
     let uploadArea: HTMLElement;
@@ -10,11 +23,25 @@
     let speedMaster = "3.4";
     let prefix = "1";
     let exportMode: ExportMode = "cues-and-timecode";
+    let timecodeName = "";
+    let exportShowTimeMacros = false;
+    let exportTimecodeControlMacros = false;
+    let transportOscSlotId = 1;
+    let transportOscDataName = "REAPER";
+    let transportMacroNamePrefix = "REAPER - ";
+    let transportOutputFileName = "reaper_transport_macros.xml";
     let isDragOver = false;
     let isProcessing = false;
     let processingStatus = "";
     let processingCompleted = false;
     let selectedFileName = "";
+    let selectedFileBaseName = "";
+    let resolvedExampleMacroTimecodeName = "";
+
+    const showTimePresetGroup = exampleMacroPresetGroups.find((group) => group.id === "show-time");
+    const timecodeControlPresetGroup = exampleMacroPresetGroups.find((group) => group.id === "timecode-control");
+
+    $: resolvedExampleMacroTimecodeName = resolveExampleMacroTimecodeName(timecodeName, selectedFileBaseName);
 
     const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -27,6 +54,22 @@
             speedMaster,
             prefix,
             exportMode,
+        };
+    }
+
+    function getMacroPresetSelection(): ExampleMacroPresetSelection {
+        return {
+            showTime: exportShowTimeMacros,
+            timecodeControl: exportTimecodeControlMacros,
+        };
+    }
+
+    function getTransportMacroOptions(): ReaperMacroGeneratorOptions {
+        return {
+            oscSlotId: transportOscSlotId,
+            oscDataName: transportOscDataName,
+            macroNamePrefix: transportMacroNamePrefix,
+            outputFileName: transportOutputFileName,
         };
     }
 
@@ -52,6 +95,7 @@
 
     async function processFile(file: File) {
         selectedFileName = file.name;
+        selectedFileBaseName = stripFileExtension(file.name);
         setProcessingState("Parsing CSV data...");
 
         try {
@@ -75,6 +119,69 @@
         } catch (error) {
             processingStatus = "❌ Error processing file";
             console.error("Error processing CSV:", error);
+            setTimeout(() => {
+                isProcessing = false;
+                processingStatus = "";
+            }, 3000);
+        }
+    }
+
+    async function exportExampleMacros() {
+        const files = createExampleMacroPresetOutputFiles({
+            sourceFileName: selectedFileBaseName,
+            timecodeName,
+            selection: getMacroPresetSelection(),
+        });
+
+        if (files.length === 0) {
+            processingStatus = "Select at least one example macro group and provide a timecode name or import a CSV file.";
+            processingCompleted = false;
+            return;
+        }
+
+        setProcessingState("Generating example macro presets...");
+
+        try {
+            await delay(100);
+
+            for (const outputFile of files) {
+                downloadTextFile(outputFile.content, outputFile.name);
+            }
+
+            processingStatus = "✅ Example macros generated successfully!";
+            processingCompleted = true;
+            setTimeout(() => {
+                isProcessing = false;
+                processingStatus = "";
+            }, 500);
+        } catch (error) {
+            processingStatus = "❌ Error generating example macros";
+            console.error("Error generating example macros:", error);
+            setTimeout(() => {
+                isProcessing = false;
+                processingStatus = "";
+            }, 3000);
+        }
+    }
+
+    async function exportReaperTransportMacros() {
+        setProcessingState("Generating REAPER transport macros...");
+
+        try {
+            await delay(100);
+            const outputFile = createReaperTransportMacroOutputFile(getTransportMacroOptions());
+
+            downloadTextFile(outputFile.content, outputFile.name);
+
+            processingStatus = "✅ REAPER transport macros generated successfully!";
+            processingCompleted = true;
+            setTimeout(() => {
+                isProcessing = false;
+                processingStatus = "";
+            }, 500);
+        } catch (error) {
+            processingStatus = error instanceof Error ? `❌ ${error.message}` : "❌ Error generating REAPER transport macros";
+            console.error("Error generating REAPER transport macros:", error);
             setTimeout(() => {
                 isProcessing = false;
                 processingStatus = "";
@@ -131,6 +238,7 @@
     function clearFile() {
         fileInput.value = "";
         selectedFileName = "";
+        selectedFileBaseName = "";
         processingCompleted = false;
         processingStatus = "";
         isProcessing = false;
@@ -231,6 +339,14 @@
                 <input id="speed-master" type="text" bind:value={speedMaster} class="input" inputmode="text" />
             </div>
 
+            <div class="input-group">
+                <label for="timecode-name" class="label">
+                    <span class="label-text">Timecode Name</span>
+                    <span class="label-hint">Used by the example macro presets, or fall back to the CSV filename</span>
+                </label>
+                <input id="timecode-name" type="text" bind:value={timecodeName} class="input" placeholder="Leave empty to use the imported CSV name" />
+            </div>
+
             <div class="input-group" class:disabled={exportMode === "cues-only"}>
                 <label for="drive-number" class="label">
                     <span class="label-text">Drive Number</span>
@@ -248,6 +364,138 @@
             <div class="syntax-examples">
                 <code>[BPM_129.5|X_foo] Intro</code>
                 <code>Intro [Temp|Flash]</code>
+            </div>
+        </div>
+
+        <div class="section-card macro-presets-card">
+            <div class="label">
+                <span class="label-text">Example macro presets</span>
+                <span class="label-hint">Optional standalone export, separate from the CSV converter.</span>
+            </div>
+
+            <div class="macro-group">
+                <label class="macro-group-toggle">
+                    <input type="checkbox" bind:checked={exportShowTimeMacros} class="macro-checkbox" />
+                    <div>
+                        <div class="macro-group-title">{showTimePresetGroup?.label}</div>
+                        <div class="macro-group-description">{showTimePresetGroup?.description}</div>
+                    </div>
+                </label>
+                <div class="macro-preset-list">
+                    {#each showTimePresetGroup?.presets ?? [] as preset}
+                        <code>{preset.label}</code>
+                    {/each}
+                </div>
+            </div>
+
+            <div class="macro-group">
+                <label class="macro-group-toggle">
+                    <input type="checkbox" bind:checked={exportTimecodeControlMacros} class="macro-checkbox" />
+                    <div>
+                        <div class="macro-group-title">{timecodeControlPresetGroup?.label}</div>
+                        <div class="macro-group-description">{timecodeControlPresetGroup?.description}</div>
+                    </div>
+                </label>
+                <div class="macro-preset-list">
+                    {#each timecodeControlPresetGroup?.presets ?? [] as preset}
+                        <code>{preset.label}</code>
+                    {/each}
+                </div>
+            </div>
+
+            <button
+                type="button"
+                class="macro-export-button"
+                on:click={exportExampleMacros}
+                disabled={isProcessing || (!exportShowTimeMacros && !exportTimecodeControlMacros) || !resolvedExampleMacroTimecodeName}
+            >
+                Generate selected example macros
+            </button>
+        </div>
+
+        <div class="section-card macro-presets-card">
+            <div class="label">
+                <span class="label-text">REAPER transport macros</span>
+                <span class="label-hint">Standalone grandMA3 macro library for OSC transport control.</span>
+            </div>
+
+            <div class="input-group">
+                <label for="transport-osc-slot-id" class="label">
+                    <span class="label-text">OSC Slot ID</span>
+                    <span class="label-hint">Numeric line ID used by SendOSC</span>
+                </label>
+                <input id="transport-osc-slot-id" type="number" min="1" step="1" bind:value={transportOscSlotId} class="input" />
+            </div>
+
+            <div class="input-group">
+                <label for="transport-osc-data-name" class="label">
+                    <span class="label-text">OSC Data Name</span>
+                    <span class="label-hint">Display-only label for grandMA3 and docs</span>
+                </label>
+                <input id="transport-osc-data-name" type="text" bind:value={transportOscDataName} class="input" />
+            </div>
+
+            <div class="input-group">
+                <label for="transport-macro-name-prefix" class="label">
+                    <span class="label-text">Macro Name Prefix</span>
+                    <span class="label-hint">Prepended to the eight generated macro names</span>
+                </label>
+                <input id="transport-macro-name-prefix" type="text" bind:value={transportMacroNamePrefix} class="input" />
+            </div>
+
+            <div class="input-group">
+                <label for="transport-output-file-name" class="label">
+                    <span class="label-text">Output File Name</span>
+                    <span class="label-hint">Downloaded XML filename</span>
+                </label>
+                <input id="transport-output-file-name" type="text" bind:value={transportOutputFileName} class="input" />
+            </div>
+
+            <p class="transport-note">
+                <strong>{transportOscDataName}</strong> is display-only. The generated <code>SendOSC</code> commands always use the numeric slot ID.
+            </p>
+
+            <button type="button" class="macro-export-button" on:click={exportReaperTransportMacros} disabled={isProcessing}>
+                Generate REAPER transport macros
+            </button>
+        </div>
+
+        <div class="usage-card section-card">
+            <div class="label">
+                <span class="label-text">What you can encode</span>
+                <span class="label-hint">Use square brackets at the start or end of the marker name.</span>
+            </div>
+            <div class="usage-grid">
+                <div class="usage-item">
+                    <div class="usage-title">Main cues</div>
+                    <code>Intro</code>
+                    <p>Empty color stays in the main sequence.</p>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-title">Repeated sequences</div>
+                    <code>SD</code>
+                    <p>Any color creates one repeated sequence per distinct color.</p>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-title">Bump overlays</div>
+                    <code>[Temp] HIT</code>
+                    <p><code>Temp</code> and <code>Flash</code> create bump sequences for overlays.</p>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-title">Cue timing</div>
+                    <code>[FadeFromX_0.5|FadeToX_1.2] Verse</code>
+                    <p><code>Fade</code> and <code>Delay</code> modifiers are emitted on the cue macro line.</p>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-title">BPM markers</div>
+                    <code>[BPM_129.5] Chorus</code>
+                    <p>Creates a dedicated BPM sequence and drives the configured Speed Master.</p>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-title">Execution token</div>
+                    <code>Intro [Go+]</code>
+                    <p>The trailing block can override the cue execution action.</p>
+                </div>
             </div>
         </div>
 
@@ -646,6 +894,145 @@
         overflow-x: auto;
     }
 
+    .usage-card {
+        margin-top: 1rem;
+    }
+
+    .macro-presets-card {
+        margin-top: 1.5rem;
+    }
+
+    .macro-group {
+        padding: 1rem 0 0;
+        border-top: 1px solid var(--border-light);
+        margin-top: 1rem;
+    }
+
+    .macro-group:first-of-type {
+        border-top: 0;
+        padding-top: 0;
+        margin-top: 0;
+    }
+
+    .macro-group-toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        cursor: pointer;
+    }
+
+    .macro-checkbox {
+        width: 18px;
+        height: 18px;
+        margin-top: 0.2rem;
+        accent-color: var(--accent-blue);
+        flex-shrink: 0;
+    }
+
+    .macro-group-title {
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .macro-group-description {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        margin-top: 0.15rem;
+    }
+
+    .macro-preset-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin: 0.75rem 0 0 1.5rem;
+    }
+
+    .macro-preset-list code {
+        padding: 0.45rem 0.6rem;
+        border-radius: 8px;
+        background: var(--step-bg);
+        border: 1px solid var(--border-light);
+        color: var(--text-primary);
+        font-size: 0.86rem;
+    }
+
+    .macro-export-button {
+        margin-top: 1.25rem;
+        padding: 0.8rem 1.1rem;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--accent-blue), #4f46e5);
+        color: var(--text-white);
+        font-weight: 700;
+        cursor: pointer;
+        transition:
+            transform 0.2s ease,
+            box-shadow 0.2s ease,
+            opacity 0.2s ease;
+        box-shadow: 0 6px 16px rgba(79, 70, 229, 0.24);
+    }
+
+    .macro-export-button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(79, 70, 229, 0.32);
+    }
+
+    .macro-export-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+        box-shadow: none;
+    }
+
+    .transport-note {
+        margin: 0.9rem 0 0;
+        padding: 0.75rem 0.9rem;
+        border-radius: 10px;
+        background: var(--note-bg);
+        border: 1px solid var(--note-border);
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+
+    .usage-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+    }
+
+    .usage-item {
+        padding: 0.9rem 1rem;
+        border-radius: 10px;
+        background: var(--step-bg);
+        border: 1px solid var(--border-light);
+    }
+
+    .usage-title {
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .usage-item code {
+        display: block;
+        padding: 0.55rem 0.7rem;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--upload-bg) 72%, transparent);
+        border: 1px solid var(--border-light);
+        color: var(--text-primary);
+        font-size: 0.86rem;
+        overflow-x: auto;
+        margin-bottom: 0.55rem;
+    }
+
+    .usage-item p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
     .section-summary {
         list-style: none;
         cursor: pointer;
@@ -856,6 +1243,10 @@
         .settings-grid {
             grid-template-columns: 1fr;
             gap: 1.5rem;
+        }
+
+        .usage-grid {
+            grid-template-columns: 1fr;
         }
 
         .upload-area {

@@ -1,6 +1,13 @@
-import type { BpmSequence, ConversionArtifacts, ConversionSettings, ConvertedMarker } from "./types.js";
+import type { ConversionArtifacts, ConversionSettings } from "./types.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
-import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerRows, splitMarkerRows } from "./markers.js";
+import {
+    createBpmSequence,
+    groupBumpSequences,
+    groupRepeatedSequences,
+    normalizeMarkerRows,
+    parseReaperMarkerRows,
+    splitMarkerRows,
+} from "./markers.js";
 import { generateMacroXML, generateTimecodeXML } from "./xml.js";
 
 export function convertReaperCsvToArtifacts(dataString: string, sourceFileName: string, settings: ConversionSettings): ConversionArtifacts {
@@ -33,27 +40,6 @@ export function convertReaperCsvToArtifacts(dataString: string, sourceFileName: 
         bpmSequence,
         macroXml,
         timecodeXml,
-    };
-}
-
-function createBpmSequence(
-    bpmMarkers: ConvertedMarker[],
-    sequenceNumber: number,
-    repeatedSequenceCount: number,
-): BpmSequence | undefined {
-    if (bpmMarkers.length === 0) {
-        return undefined;
-    }
-
-    return {
-        displayName: "BPM",
-        sequenceNumber: sequenceNumber + repeatedSequenceCount + 1,
-        events: bpmMarkers.map((marker) => ({
-            displayName: marker.displayName,
-            timestamp: marker.start,
-            bpm: marker.bpm as number,
-            bpmText: marker.bpmText as string,
-        })),
     };
 }
 

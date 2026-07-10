@@ -16,8 +16,14 @@ Check out the link above. You can create your own Reaper project or use [this de
 
 -   Auto-Convert markers from csv to MA timecode
 -   Support for repeated and unique sequences / cues
+-   Generate standalone grandMA3 REAPER transport macro libraries
 -   Web-based interface for easy access
 -   No software installation required
+
+## REAPER transport macros
+
+The app can also generate a standalone grandMA3 macro library with eight REAPER transport macros over OSC.
+See [docs/grandma3-reaper-osc.md](./docs/grandma3-reaper-osc.md) for setup, import instructions, and the distinction between the OSC line name and its numeric slot ID.
 
 | From this              | To this            |
 | ---------------------- | ------------------ |

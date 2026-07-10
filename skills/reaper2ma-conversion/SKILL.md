@@ -7,12 +7,12 @@ description: Project-specific guidance for modifying, testing, or reviewing Reap
 
 ## Overview
 
-Use this skill to preserve the domain rules behind the converter. The important distinction is that uncolored Reaper markers become cues in one master sequence, while colored markers become color-grouped repeated/effect sequences with one cue triggered multiple times.
+Use this skill to preserve the domain rules behind the converter. The important distinction is that uncolored Reaper markers become cues in one master sequence, colored markers become color-grouped repeated/effect sequences, and `Temp` / `Flash` markers become bump overlays. Marker parsing and XML generation are now split into smaller services behind stable facades.
 
 ## First steps
 
 1. Read `research.md`, especially the conversion, risks, and demo sections.
-2. Inspect `src/routes/+page.svelte`; conversion logic currently lives in the component script.
+2. Inspect `src/lib/reaper2ma/*`; conversion logic now lives there, with the page component handling only UI.
 3. Identify whether the change affects input parsing, grouping, macro XML, timecode XML, or UI settings.
 4. Preserve current behavior unless the user explicitly asks for a conversion semantics change.
 
@@ -27,6 +27,11 @@ Use this skill to preserve the domain rules behind the converter. The important 
 - Group repeated/effect markers by exact color string in first-seen order.
 - Name each repeated sequence from the first marker in that color group, prefixed as `{prefix} - {name}`.
 - Allocate repeated sequence numbers from `sequenceNumber + 1`.
+- Route `Temp` and `Flash` execution tokens into bump overlay sequences, grouped by color and cue name.
+- Parse leading or trailing `[]` blocks for `BPM`, `CueFade`, cue timing modifiers, and execution tokens. Cue timing families should stay isolated in their own providers.
+- Validate cue timing modifiers and emit them as grandMA3 `Set Sequence ... Cue ... Part 0.1 ...` commands.
+- Create one grandMA3 appearance per distinct Reaper color, starting at the configured appearance ID.
+- Apply the configured `Speed Master` to every generated sequence.
 - Always generate macro XML.
 - Generate timecode XML only in `cues-and-timecode` export mode.
 
@@ -34,9 +39,10 @@ Use this skill to preserve the domain rules behind the converter. The important 
 
 - Keep the `GMA3` root and `DataVersion="1.4.0.2"` unless updating intentionally for grandMA3 compatibility.
 - Macro lines use `@_Command` and `@_Wait: "0.10"`.
-- Unique cue macro commands store a cue range in the base sequence and label each cue.
-- Repeated sequence macro commands store a named sequence, store cue 1 with `/Merge`, and set OffCue `TRIGTYPE` to `Follow`.
-- Timecode events use `ExecToken="Goto"`.
+- Unique cue macro commands store a cue range in the base sequence, label each cue, and then apply optional cue fade/timing commands.
+- Repeated sequence macro commands store a named sequence, store cue 1 with `/Merge`, assign an appearance, and set OffCue `TRIGTYPE` to `Follow`.
+- Bump macro commands follow the same pattern as repeated sequences but use the bump naming convention.
+- Timecode events use `ExecToken="Goto"` for main cues and the parsed execution token for repeated/bump overlays.
 - The first event in each target sequence sets `@_Object`; later events omit it.
 - Use `XMLBuilder` rather than manual string assembly unless there is a strong reason.
 

@@ -2,9 +2,9 @@
 
 ## Executive summary
 
-This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence and repeated color-based effect sequences, builds grandMA3 macro/timecode XML with `fast-xml-parser`, and immediately downloads one or two XML files.
+This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds grandMA3 macro/timecode XML with `fast-xml-parser` and immediately downloads one or two XML files.
 
-The core product logic is concentrated in `src/routes/+page.svelte`. There is no separate conversion library and there are no automated tests yet. After installing locked dependencies with `pnpm install --frozen-lockfile`, both `pnpm check` and `pnpm build` pass.
+The core product logic now lives in `src/lib/reaper2ma/*` rather than the page component. There is a conversion library, XML generation helpers, and automated fixture tests. After installing locked dependencies with `pnpm install --frozen-lockfile`, both `pnpm check` and `pnpm build` pass.
 
 The most important project-specific details for future agents are:
 
@@ -19,7 +19,9 @@ The most important project-specific details for future agents are:
 
 Tracked source and configuration:
 
-- `src/routes/+page.svelte` - Main Svelte component, all CSV parsing, XML generation, UI, and CSS.
+- `src/routes/+page.svelte` - Main Svelte component for the converter UI, upload flow, and page styling.
+- `src/lib/reaper2ma/` - Conversion library split into marker parsing, provider registry, sequence grouping, and XML emitters.
+- `src/lib/reaper2ma/macro-presets.ts` - Example grandMA3 macro preset registry and renderer, separate from the CSV conversion flow.
 - `src/routes/+layout.svelte` - Sets the favicon and renders children.
 - `src/routes/+layout.server.ts` - Exports `prerender = true`.
 - `src/app.html` - HTML shell, viewport, theme colors, base global body styles.
@@ -34,7 +36,7 @@ Tracked source and configuration:
 - `.github/workflows/deploy.yml` - GitHub Pages deployment workflow.
 - `demo/demo.RPP`, `demo/reaper.png`, `demo/ma.png` - Example Reaper project and screenshots.
 
-New agent-facing files added by this pass:
+Agent-facing files:
 
 - `AGENTS.md` - Operating instructions for agents working in this repo.
 - `skills/reaper2ma-conversion/SKILL.md` - Project skill for conversion logic changes.
@@ -96,11 +98,14 @@ The page has one primary workflow:
 2. Browser `FileReader` reads the file as text.
 3. The original file name is normalized for output names.
 4. CSV rows are parsed into objects by header.
-5. Marker names are sanitized and duplicate names are suffixed.
+5. Marker names are sanitized, duplicate names are suffixed, and optional bracket tags are parsed.
 6. Rows with empty color become `uniqueCues`.
 7. Rows with non-empty color are grouped by exact color into `repeatedSequences`.
-8. Macro XML is always generated and downloaded.
-9. Timecode XML is generated and downloaded only in `cues-and-timecode` mode.
+8. Markers with `Temp` or `Flash` execution tokens become bump overlays grouped by color and cue name.
+9. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+10. Macro XML is always generated and downloaded.
+11. Timecode XML is generated and downloaded only in `cues-and-timecode` mode.
+12. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
 
 The default settings are:
 
@@ -149,6 +154,14 @@ Duplicate marker names are counted globally after sanitization:
 
 This naming matters because generated grandMA3 commands embed names in quoted command strings and timecode object paths.
 
+Bracket tags are parsed from leading or trailing `[]` blocks:
+
+- Leading blocks can carry metadata like `BPM_129.5`, `CueFade_6/12`, `FadeFromX_0.5`, or `Temp`.
+- Trailing blocks can override the execution token, for example `Intro [Go+]`.
+- Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, and `Flash`.
+- Cue timing tags are emitted on the generated macro line as `Set Sequence ... Cue "..." Part 0.1 ...`.
+- Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
+
 ## Unique cue behavior
 
 Rows with empty `Color` are considered normal cues in the master sequence.
@@ -157,6 +170,7 @@ Macro XML for unique cues:
 
 - Stores cue range in the base sequence: `Store Sequence {sequenceNumber} Cue {cueStartNumber} thru {lastCueNumber}`.
 - Labels each cue in order: `Label Sequence {sequenceNumber} Cue {cueNumber} "{name}"`.
+- If present, `CueFade` and cue timing tags are applied after the cue is labeled.
 - Cue numbers start at `cueStartNumber`.
 
 Timecode XML for unique cues:
@@ -180,13 +194,16 @@ Grouping rules:
 - The first marker name for a color becomes the sequence name.
 - The sequence name is prefixed as `{prefix} - {firstMarkerName}`.
 - Repeated sequence numbers start at `sequenceNumber + 1` and increment by first-seen color group.
-- Each repeated sequence has one cue, triggered at every timestamp in that group.
+- Each repeated sequence has a cue stack with `Start` as cue 1 and later cue names created on demand per color group.
+- If a cue name already exists in that repeated sequence, the cue is reused instead of duplicated.
 
 Macro XML for repeated sequences:
 
 - Stores a sequence with a name: `Store Sequence {repeatedSequenceNumber} "{prefix} - {name}"`.
 - Stores cue 1 in that sequence with `/Merge`.
 - Sets the OffCue trigger type to `Follow`.
+- Assigns a grandMA3 appearance per distinct Reaper color.
+- Applies `CueFade` and cue timing tags to the created cues when present.
 
 Timecode XML for repeated sequences:
 
@@ -215,7 +232,9 @@ All generated files start with:
 <?xml version="1.0" encoding="UTF-8"?>
 ```
 
-The generated root is `GMA3` with `DataVersion="1.4.0.2"`.
+The generated root is `GMA3` with `DataVersion="1.4.0.2"` for the CSV conversion flow.
+
+The repository also includes standalone macro-library examples in `example/macro/*.xml`. Those files use `DataVersion="2.4.2.2"` and a simpler single-macro structure. Any new standalone macro-library generator should follow that macro-library convention while leaving the CSV conversion XML unchanged.
 
 Macro specifics:
 
@@ -223,7 +242,10 @@ Macro specifics:
 - Macro name is `Macro {filename}`.
 - Macro GUID is currently hardcoded.
 - Every macro line waits `0.10`.
+- Every created sequence gets the configured Speed Master assignment.
 - In `cues-and-timecode` mode, the macro runs `Drive {driveNumber}` and `import Timecode "{filename}_timecode"`.
+- Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} "Color" "r,g,b,a"`, then `Assign Appearance "{name}" at Sequence {sequenceNumber}`.
+- BPM markers create a dedicated sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`.
 
 Timecode specifics:
 
@@ -236,6 +258,8 @@ Timecode specifics:
 - SwitchOff is `Keep Playbacks`.
 - Timedisplayformat is `<10d11h23m45>`.
 - FrameReadout is `<Seconds>`.
+- BPM markers create a dedicated BPM track in the timecode export.
+- Bump overlays get their own track group separate from music sequences.
 
 Potential issue: timecode duration is based only on the last unique cue start plus one second. Repeated sequence timestamps are ignored. If the last event is a colored/repeated marker after the last uncolored marker, the generated timecode duration can be too short.
 

@@ -5,3 +5,7 @@ export function normalizeOutputBaseName(fileName: string): string {
 export function buildOutputFileName(baseName: string, suffix: string): string {
     return `${baseName}_${suffix}.xml`;
 }
+
+export function stripFileExtension(fileName: string): string {
+    return fileName.replace(/\.[^.]+$/, "");
+}

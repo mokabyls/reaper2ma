@@ -32,6 +32,7 @@ Use this skill to change the SvelteKit app while preserving its static, browser-
 - Maintain responsive behavior for the settings grid and instructions.
 - Keep light/dark theme variables consistent if changing colors.
 - Fix accessibility issues opportunistically when in the same area, especially duplicate IDs, labels, keyboard behavior, and inline error states.
+- When adding syntax help, prefer short actionable sections over long prose and show concrete marker examples for `BPM`, `CueFade`, cue timing tags, `Temp` / `Flash`, and execution overrides.
 
 ## Build and deployment
 
@@ -47,6 +48,7 @@ Use this skill to change the SvelteKit app while preserving its static, browser-
 - `alert()` is used for invalid drops; inline state would fit the UI better.
 - `fileInput.files = files` in drag/drop may be browser-sensitive.
 - Random input `name={Math.random().toString()}` is unusual in a prerendered Svelte app; avoid expanding that pattern.
+- The settings card already includes syntax help; keep it current when conversion semantics change.
 
 ## Validation
 

@@ -4,4 +4,7 @@ export function normalizeOutputBaseName(fileName) {
 export function buildOutputFileName(baseName, suffix) {
     return `${baseName}_${suffix}.xml`;
 }
+export function stripFileExtension(fileName) {
+    return fileName.replace(/\.[^.]+$/, "");
+}
 //# sourceMappingURL=filename.js.map

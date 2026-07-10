@@ -1,5 +1,5 @@
 import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
-import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerRows, splitMarkerRows } from "./markers.js";
+import { createBpmSequence, groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerRows, splitMarkerRows, } from "./markers.js";
 import { generateMacroXML, generateTimecodeXML } from "./xml.js";
 export function convertReaperCsvToArtifacts(dataString, sourceFileName, settings) {
     const rows = parseReaperMarkerRows(dataString);
@@ -23,21 +23,6 @@ export function convertReaperCsvToArtifacts(dataString, sourceFileName, settings
         bpmSequence,
         macroXml,
         timecodeXml,
-    };
-}
-function createBpmSequence(bpmMarkers, sequenceNumber, repeatedSequenceCount) {
-    if (bpmMarkers.length === 0) {
-        return undefined;
-    }
-    return {
-        displayName: "BPM",
-        sequenceNumber: sequenceNumber + repeatedSequenceCount + 1,
-        events: bpmMarkers.map((marker) => ({
-            displayName: marker.displayName,
-            timestamp: marker.start,
-            bpm: marker.bpm,
-            bpmText: marker.bpmText,
-        })),
     };
 }
 export function createConversionOutputFiles(artifacts) {

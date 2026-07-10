@@ -1,0 +1,207 @@
+import * as csv from "@vanillaes/csv";
+import { createDefaultMarkerTagProviderRegistry } from "./providers/registry.js";
+const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9äöüÄÖÜß \-_#%\/\(\)\[\]=+]/g;
+const EXECUTION_SUFFIX_PATTERN = /^(.*)\s\[(.+)\]\s*$/;
+const CANONICAL_EXECUTION_TOKENS = {
+    "go+": "Go+",
+    "go-": "Go-",
+    goto: "Goto",
+    load: "Load",
+    on: "On",
+    select: "Select",
+    top: "Top",
+    temp: "Temp",
+    flash: "Flash",
+};
+const markerTagProviderRegistry = createDefaultMarkerTagProviderRegistry();
+export function sanitizeMarkerName(name) {
+    return name.replace(SAFE_MARKER_NAME_PATTERN, "");
+}
+export function parseMarkerName(name) {
+    const trimmedName = name.trim();
+    const { remainder, tags, execParts: headExecParts } = parseLeadingTagBlocks(trimmedName);
+    const { displayName: rawDisplayName, execToken: suffixExecToken } = parseExecutionSuffix(remainder);
+    const displayName = sanitizeMarkerName(rawDisplayName.trim());
+    const markerMetadata = markerTagProviderRegistry.enrich(tags);
+    const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Goto";
+    return {
+        displayName,
+        execToken,
+        tags,
+        ...(markerMetadata.cueTiming.length > 0
+            ? {
+                cueTiming: markerMetadata.cueTiming,
+            }
+            : {}),
+        ...(markerMetadata.bpm !== undefined
+            ? {
+                bpm: markerMetadata.bpm,
+                bpmText: markerMetadata.bpmText,
+            }
+            : {}),
+        ...(markerMetadata.cueFade !== undefined
+            ? {
+                cueFade: markerMetadata.cueFade,
+            }
+            : {}),
+    };
+}
+export function parseMarkerExecution(name) {
+    const parsedMarker = parseMarkerName(name);
+    return {
+        displayName: parsedMarker.displayName,
+        execToken: parsedMarker.execToken,
+    };
+}
+export function parseReaperMarkerRows(dataString) {
+    const parsedLines = csv.parse(dataString);
+    const header = parsedLines[0] ?? [];
+    return parsedLines.slice(1).map((row) => {
+        const obj = {};
+        row.forEach((value, index) => {
+            const key = header[index];
+            if (key) {
+                obj[key] = value;
+            }
+        });
+        return {
+            "#": obj["#"] ?? "",
+            Name: obj.Name ?? "",
+            Start: obj.Start ?? "",
+            Color: obj.Color ?? "",
+        };
+    });
+}
+export function normalizeMarkerRows(rows) {
+    return rows.map((row) => {
+        const marker = parseMarkerName(row.Name);
+        return {
+            displayName: marker.displayName,
+            execToken: marker.execToken,
+            tags: marker.tags,
+            start: row.Start,
+            color: row.Color,
+            ...(marker.cueTiming !== undefined
+                ? {
+                    cueTiming: marker.cueTiming,
+                }
+                : {}),
+            ...(marker.bpm !== undefined
+                ? {
+                    bpm: marker.bpm,
+                    bpmText: marker.bpmText,
+                }
+                : {}),
+            ...(marker.cueFade !== undefined
+                ? {
+                    cueFade: marker.cueFade,
+                }
+                : {}),
+        };
+    });
+}
+function parseLeadingTagBlocks(name) {
+    const tags = [];
+    const execParts = [];
+    let remainder = name;
+    while (remainder.startsWith("[")) {
+        const closingBracketIndex = remainder.indexOf("]");
+        if (closingBracketIndex < 0) {
+            break;
+        }
+        const rawBlock = remainder.slice(1, closingBracketIndex).trim();
+        if (rawBlock.length > 0) {
+            const parsedBlock = parseMarkerBlock(rawBlock);
+            tags.push(...parsedBlock.tags);
+            execParts.push(...parsedBlock.execParts);
+        }
+        remainder = remainder.slice(closingBracketIndex + 1).trimStart();
+    }
+    return {
+        remainder,
+        tags,
+        execParts,
+    };
+}
+function parseMarkerBlock(block) {
+    const tags = [];
+    const execParts = [];
+    for (const token of block.split("|")) {
+        const parsedToken = token.trim();
+        if (!parsedToken) {
+            continue;
+        }
+        const execToken = canonicalizeExecutionToken(parsedToken);
+        if (execToken) {
+            execParts.push(execToken);
+            continue;
+        }
+        const tag = parseMarkerTagToken(parsedToken);
+        if (tag) {
+            tags.push(tag);
+        }
+    }
+    return {
+        tags,
+        execParts,
+    };
+}
+function parseMarkerTagToken(token) {
+    const trimmedToken = token.trim();
+    if (!trimmedToken) {
+        return null;
+    }
+    const separatorIndex = trimmedToken.indexOf("_");
+    if (separatorIndex < 0) {
+        return {
+            key: trimmedToken.toUpperCase(),
+            value: null,
+        };
+    }
+    const key = trimmedToken.slice(0, separatorIndex).trim().toUpperCase();
+    const value = trimmedToken.slice(separatorIndex + 1).trim();
+    if (!key) {
+        return null;
+    }
+    return {
+        key,
+        value: value.length > 0 ? value : null,
+    };
+}
+function parseExecutionSuffix(name) {
+    const suffixMatch = name.trim().match(EXECUTION_SUFFIX_PATTERN);
+    if (!suffixMatch) {
+        return {
+            displayName: name.trim(),
+        };
+    }
+    const displayName = suffixMatch[1].trim();
+    const execToken = normalizeExecutionToken(suffixMatch[2]);
+    if (!execToken) {
+        return {
+            displayName,
+        };
+    }
+    return {
+        displayName,
+        execToken,
+    };
+}
+function normalizeExecutionToken(token) {
+    const parts = token.split("|").map((part) => canonicalizeExecutionToken(part));
+    if (parts.length === 0) {
+        return undefined;
+    }
+    if (parts.some((part) => !part)) {
+        return undefined;
+    }
+    return parts.join("|");
+}
+function canonicalizeExecutionToken(token) {
+    const normalizedToken = token.trim().toLowerCase();
+    if (!normalizedToken) {
+        return undefined;
+    }
+    return CANONICAL_EXECUTION_TOKENS[normalizedToken];
+}
+//# sourceMappingURL=marker-parser.js.map

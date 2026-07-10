@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="SHOW TIME AUTO RESTORE" Guid="BA AD F0 0D 7E 49 7F 40 38 08 67 09 11 DF 30 B8">
+        <MacroLine Guid="BA AD F0 0D DC A0 67 6B ED 8E 4F 0E 10 DF 30 B8" Command="(Passage en Auto. Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D 80 AF 96 5A A2 15 38 13 10 DF 30 B8" Command="(Passage en Auto Confirmé. Vraiment Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D A2 48 6B 06 76 30 DA 26 10 DF 30 B8" Command="Macro &quot;RESET&quot;"/>
+        <MacroLine Guid="BA AD F0 0D AB 09 51 1E B4 58 4D 44 16 A5 0D BA" Command="Set Timecode &quot;odyssees-erin&quot; &quot;TCSlot&quot; 1"/>
+        <MacroLine Guid="BA AD F0 0D 33 0A EE 60 69 DF 35 49 0D A5 0D BA" Command="Go+ Timecode &quot;odyssees-erin&quot;"/>
+    </Macro>
+</GMA3>

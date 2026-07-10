@@ -1,0 +1,8 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Enable Art-Net Output" Guid="BA AD F0 0D 95 7D 19 11 1B 70 BA 8C 79 69 17 F2">
+        <MacroLine Guid="BA AD F0 0D EB 55 7E 21 52 8B 1B 0B 32 CC 8F 8C" Command="Set DeviceConfigurations.DmxProtocols.sACN &quot;Out&quot; 0" Enabled="No"/>
+        <MacroLine Guid="BA AD F0 0D 8F 25 30 74 7B 03 B7 C0 B9 AD CF F3" Command="Set DeviceConfigurations.DmxProtocols.ArtNet &quot;Out&quot; 1" Enabled="No"/>
+        <MacroLine Guid="BA AD F0 0D 51 0D 78 59 A4 11 45 A5 B2 28 71 FB" Command="Set DeviceConfigurations.DmxProtocols.ArtNet.ArtNetDataCollect.MainStage &quot;Enabled&quot; 1" Enabled="No"/>
+    </Macro>
+</GMA3>

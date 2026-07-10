@@ -1,0 +1,8 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Post-Show" Guid="BA AD F0 0D 39 44 BC 2E 7B 6D C4 91 C3 C9 C0 1E">
+        <MacroLine Guid="BA AD F0 0D C1 66 13 55 30 F4 AC 96 C0 C9 C0 1E" Command="Off Sequence 1 Thru"/>
+        <MacroLine Guid="BA AD F0 0D 93 CD E8 65 E5 7A 95 9B C1 C9 C0 1E" Command="On Sequence &quot;Post-Show&quot;"/>
+        <MacroLine Guid="BA AD F0 0D AB 40 3A 5D F6 01 7C 10 2C AD 86 D8" Command="Go+ Macro &quot;Disable Art-Net Output&quot;"/>
+    </Macro>
+</GMA3>

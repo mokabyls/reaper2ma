@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Pre-Show" Guid="BA AD F0 0D 36 D7 29 37 3D 45 51 74 32 3B AE 1D">
+        <MacroLine Guid="BA AD F0 0D 02 E2 B7 38 A7 52 22 7E C5 47 C7 1D" Command="Off Sequence 1 Thru"/>
+        <MacroLine Guid="BA AD F0 0D 44 92 95 33 11 60 F3 87 33 82 C8 1C" Command="On Sequence &quot;Pre-Show&quot;"/>
+    </Macro>
+</GMA3>

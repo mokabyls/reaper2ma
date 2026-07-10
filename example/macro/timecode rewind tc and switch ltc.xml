@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Timecode Rewind TC and Switch LTC" Guid="BA AD F0 0D E0 8B 79 79 37 97 B1 64 AD 32 B6 54">
+        <MacroLine Guid="BA AD F0 0D A4 C9 47 20 EC 1D 9A 69 AD 32 B6 54" Command="(Passage en TimeCode LTC. Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D C0 1E A8 4F A1 A4 82 6E AE 32 B6 54" Command="Off Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="BA AD F0 0D F3 54 F4 2B 56 2B 6B 73 AE 32 B6 54" Command="Top Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="BA AD F0 0D 28 27 87 40 0B B2 53 78 AE 32 B6 54" Command="Set Timecode &quot;odyssees-erin&quot; &quot;TCSlot&quot; 1"/>
+        <MacroLine Guid="BA AD F0 0D 96 40 A4 62 C0 38 3C 7D AE 32 B6 54" Command="Go+ Timecode &quot;odyssees-erin&quot;"/>
+    </Macro>
+</GMA3>

@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="SHOW TIME MANUEL" Guid="BA AD F0 0D 53 29 A4 17 5A 09 E3 4E 97 42 C6 B5">
+        <MacroLine Guid="BA AD F0 0D 41 42 F9 39 CE FA 95 FF 84 64 66 BE" Command="(Passage en Manuel. Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D 12 E8 AA 14 98 31 56 6C F6 E4 E3 B7" Command="(Passage en Manuel Confirmé. Vraiment Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D DF 82 DA 56 4D B8 3E 71 EE E4 E3 B7" Command="Off Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="BA AD F0 0D AF 64 4D 2D 02 3F 27 76 EE E4 E3 B7" Command="Top Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="BA AD F0 0D EF 16 5A 2E B7 C5 0F 7B EF E4 E3 B7" Command="Set Timecode &quot;odyssees-erin&quot; &quot;TCSlot&quot; -2"/>
+        <MacroLine Guid="BA AD F0 0D 98 72 BB 6D C4 16 B4 58 82 E2 F6 B5" Command="Macro &quot;RESET&quot;"/>
+        <MacroLine Guid="7A C7 0E 39 20 9B C6 42 E2 2C 67 1E 6B 66 64 18" Command="Page 1"/>
+        <MacroLine Guid="BA AD F0 0D 97 90 8B 76 A8 1B A2 DE CF 57 79 43" Command="On Sequence &quot;Rescue POS&quot;"/>
+        <MacroLine Guid="BA AD F0 0D 9B 36 17 31 77 44 D3 9E A5 39 72 44" Command="On Sequence &quot;Erin&quot; Cue 1"/>
+        <MacroLine Guid="BA AD F0 0D 71 4F DB 0F 83 81 7E 04 FE 6D 16 B9" Command="On Sequence &quot;StartShow 1&quot;"/>
+        <MacroLine Guid="7A C7 0E 39 0F 41 5A 7F 9C 48 04 4A C3 2C 25 CC" Command="On Sequence &quot;StartShow 2&quot;"/>
+        <MacroLine Guid="7A C7 0E 39 27 F2 7C 24 51 CF EC 4E F0 C0 6D CC" Command="On Sequence &quot;StartShow 3&quot;"/>
+        <MacroLine Guid="7A C7 0E 39 73 CE BE 39 06 56 D5 53 E2 41 AC CC" Command="On Sequence &quot;StartShow 4&quot;"/>
+        <MacroLine Guid="BA AD F0 0D 8A 01 21 44 21 D3 E0 84 1A 00 FD B6" Command="On Sequence &quot;StartShow 5&quot;"/>
+    </Macro>
+</GMA3>

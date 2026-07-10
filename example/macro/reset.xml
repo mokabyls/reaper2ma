@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Reset" Guid="BA AD F0 0D C1 B4 7B 5F 4F 88 66 A5 54 F6 70 1A">
+        <MacroLine Guid="BA AD F0 0D 78 40 C8 2C 04 0F 4F AA 55 F6 70 1A" Command="Off Sequence 1 Thru"/>
+        <MacroLine Guid="BA AD F0 0D 77 7B 1B 10 8C F4 AA 06 D0 23 5D DE" Command="ClearAll"/>
+        <MacroLine Guid="BA AD F0 0D 26 AC D0 19 B9 95 37 AF 52 F6 70 1A" Command="Go+ Macro &quot;Enable Art-Net Output&quot;"/>
+        <MacroLine Guid="BA AD F0 0D 7B 45 B5 1A AC 44 93 D1 C0 E4 ED 01" Command="Top Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="7A C7 0E 39 85 E4 DA 01 70 18 2D 46 D6 5E 91 71" Command="Set Timecode &quot;odyssees-erin&quot; &quot;TCSlot&quot; 1"/>
+        <MacroLine Guid="BA AD F0 0D 54 2C 50 07 EA 6C 06 EF 0D 5A 61 0E" Command="Off Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="7A C7 0E 39 5A 3F 30 3B 09 20 54 B7 4E 90 54 21" Command="FaderMaster #47E000B97 At 100"/>
+        <MacroLine Guid="7A C7 0E 39 C5 BE 95 7C 80 7E C9 9E 78 12 14 39" Command="FaderMaster #25BC000024 At 100"/>
+        <MacroLine Guid="7A C7 0E 39 DA 3E 66 67 78 1F 96 14 9F 14 73 1E" Command="Page 2"/>
+        <MacroLine Guid="7A C7 0E 39 4D 90 6B 0D FC CE AF D9 70 66 AD 16" Command="Master &quot;Playback&quot;.&quot;Timecode&quot; At 100"/>
+        <MacroLine Guid="7A C7 0E 39 DC 63 36 20 66 DC 80 E3 10 2D A7 11" Command="Master &quot;Playback&quot;.&quot;Interlude&quot; At 100"/>
+        <MacroLine Guid="7A C7 0E 39 AB B8 1B 65 3A F7 22 F7 57 25 0A 12" Command="Master &quot;Playback&quot;.&quot;Erin&quot; At 100"/>
+        <MacroLine Guid="7A C7 0E 39 D5 4C 18 04 47 48 C7 D4 70 2D 5E 17" Command="Master &quot;Grand&quot;.&quot;Master&quot; At 100"/>
+    </Macro>
+</GMA3>

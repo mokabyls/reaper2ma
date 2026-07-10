@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Timecode Rewind And Switch INT" Guid="BA AD F0 0D C9 9D F7 1B 56 2B 6B 73 F4 D3 A4 AA">
+        <MacroLine Guid="BA AD F0 0D 11 A3 13 24 0B B2 53 78 F4 D3 A4 AA" Command="(Passage en TimeCode Manuel. Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D 21 91 BA 7E C0 38 3C 7D F5 D3 A4 AA" Command="Off Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="BA AD F0 0D C3 BD 8C 4C B1 36 04 25 33 E8 CB 73" Command="Top Timecode &quot;odyssees-erin&quot;"/>
+        <MacroLine Guid="BA AD F0 0D 11 FD 8A 15 75 BF 24 82 F5 D3 A4 AA" Command="Set Timecode &quot;odyssees-erin&quot; &quot;TCSlot&quot; -2"/>
+        <MacroLine Guid="BA AD F0 0D F0 EF A5 64 51 0D 15 C2 22 9A F9 63" Command="Pause Timecode &quot;odyssees-erin&quot;"/>
+    </Macro>
+</GMA3>

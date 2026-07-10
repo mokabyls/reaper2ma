@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Disable Art-Net Output" Guid="BA AD F0 0D 30 8E 6F 1E 1D F5 68 A9 40 11 C9 D3">
+        <MacroLine Guid="BA AD F0 0D 42 E6 B3 33 D2 7B 51 AE 41 11 C9 D3" Command="Set DeviceConfigurations.DmxProtocols.ArtNet &quot;Out&quot; 0" Enabled="No"/>
+        <MacroLine Guid="BA AD F0 0D 78 C4 3D 61 87 02 3A B3 41 11 C9 D3" Command="Set DeviceConfigurations.DmxProtocols.ArtNet.ArtNetDataCollect.MainStage &quot;Enabled&quot; 0" Enabled="No"/>
+    </Macro>
+</GMA3>

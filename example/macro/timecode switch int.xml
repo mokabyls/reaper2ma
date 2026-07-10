@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.4.2.2">
+    <Macro Name="Timecode Switch INT" Guid="BA AD F0 0D E1 67 6A 02 F4 7C CD F3 EA 9E 28 61">
+        <MacroLine Guid="BA AD F0 0D 1C B2 F3 10 A9 03 B6 F8 ED 9E 28 61" Command="(Passage en TimeCode Manuel. Certain ?)"/>
+        <MacroLine Guid="BA AD F0 0D 60 CA C2 2A C8 97 6F 07 EC 9E 28 61" Command="Set Timecode &quot;odyssees-erin&quot; &quot;TCSlot&quot; -2"/>
+    </Macro>
+</GMA3>

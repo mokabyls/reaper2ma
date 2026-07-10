@@ -31,6 +31,7 @@ Use this skill to preserve the domain rules behind the converter. The important 
 - Allow `[GLOBAL]` or `[MAIN]` markers to stay in the main sequence even when they fall inside a region.
 - Route `Temp` and `Flash` execution tokens into bump overlay sequences, grouped by color and cue name.
 - Parse leading or trailing `[]` blocks for `BPM`, `CueFade`, cue timing modifiers, and execution tokens. Cue timing families should stay isolated in their own providers.
+- Parse bump release tags as `Release_...`, `TempRelease`, and `FlashRelease`, with a fallback release inserted just after the start when no release tag is present.
 - Validate cue timing modifiers and emit them as grandMA3 `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...` commands.
 - Create one grandMA3 appearance per distinct Reaper color, starting at the configured appearance ID.
 - Convert appearance colors from decimal Reaper values, `0x...`, `#RRGGBB`, and six-digit hex values with A-F characters. Macro output uses grandMA background channels: `COLOR="1,1,1,0" BackR={0..255} BackG={0..255} BackB={0..255} BackAlpha=221`.

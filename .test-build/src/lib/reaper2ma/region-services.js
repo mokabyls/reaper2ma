@@ -25,7 +25,7 @@ export function parseRegions(rows) {
 }
 export function assignMarkersToRegions(markers, regions) {
     return markers.map((marker) => {
-        if (marker.isGlobal) {
+        if (marker.isGlobal || marker.bumpAction !== undefined) {
             return marker;
         }
         const region = resolveContainingRegion(marker.start, regions);

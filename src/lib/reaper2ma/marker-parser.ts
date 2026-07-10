@@ -1,6 +1,6 @@
 import * as csv from "@vanillaes/csv";
 
-import type { ConvertedMarker, MarkerTag, ReaperMarkerRow, RegionActionTag } from "./types.js";
+import type { BumpActionTag, ConvertedMarker, MarkerTag, ReaperMarkerRow, RegionActionTag } from "./types.js";
 import { createDefaultMarkerTagProviderRegistry } from "./providers/registry.js";
 
 const SAFE_MARKER_NAME_PATTERN = /[^a-zA-Z0-9À-ÖØ-öø-ÿĀ-ſ \-_#%\/\(\)\[\]=+]/g;
@@ -13,8 +13,12 @@ const CANONICAL_EXECUTION_TOKENS: Record<string, string> = {
     on: "On",
     select: "Select",
     top: "Top",
+    bump: "Temp",
     temp: "Temp",
     flash: "Flash",
+    bumprelease: "TempRelease",
+    temprelease: "TempRelease",
+    flashrelease: "FlashRelease",
 };
 const GLOBAL_SCOPE_TAGS = new Set(["GLOBAL", "MAIN"]);
 
@@ -25,6 +29,7 @@ type ParsedMarkerName = {
     execToken: string;
     tags: MarkerTag[];
     isGlobal?: boolean;
+    bumpAction?: BumpActionTag;
     regionActions?: RegionActionTag[];
     cueTiming?: NonNullable<ConvertedMarker["cueTiming"]>;
     bpm?: number;
@@ -45,12 +50,14 @@ export function parseMarkerName(name: string): ParsedMarkerName {
     const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag)));
     const isGlobal = tags.some(isGlobalScopeTag);
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
+    const bumpAction = parseBumpAction(execToken, tags);
 
     return {
         displayName,
         execToken,
         tags,
         ...(isGlobal ? { isGlobal } : {}),
+        ...(bumpAction ? { bumpAction } : {}),
         ...(regionActions.length > 0
             ? {
                   regionActions,
@@ -122,6 +129,7 @@ export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] 
             execToken: marker.execToken,
             tags: markerTags,
             ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
+            ...(marker.bumpAction ? { bumpAction: marker.bumpAction } : {}),
             ...(marker.regionActions && marker.regionActions.length > 0
                 ? {
                       regionActions: marker.regionActions,
@@ -313,6 +321,41 @@ function isGlobalScopeTag(tag: MarkerTag): boolean {
     }
 
     return GLOBAL_SCOPE_TAGS.has(tag.key.trim().toUpperCase());
+}
+
+function parseBumpAction(execToken: string, tags: MarkerTag[]): BumpActionTag | undefined {
+    const normalizedExecToken = execToken.trim().toLowerCase();
+
+    if (normalizedExecToken !== "temp" && normalizedExecToken !== "flash" && normalizedExecToken !== "temprelease" && normalizedExecToken !== "flashrelease") {
+        return undefined;
+    }
+
+    if (normalizedExecToken === "temprelease" || normalizedExecToken === "flashrelease") {
+        return {
+            kind: normalizedExecToken === "temprelease" ? "Temp" : "Flash",
+            phase: "release",
+        };
+    }
+
+    const releaseDelayMs = parseReleaseDelayMs(tags);
+
+    return {
+        kind: normalizedExecToken === "temp" ? "Temp" : "Flash",
+        phase: "start",
+        ...(releaseDelayMs !== undefined ? { releaseDelayMs } : {}),
+    };
+}
+
+function parseReleaseDelayMs(tags: MarkerTag[]): number | undefined {
+    const releaseTag = tags.find((tag) => tag.key.trim().toUpperCase() === "RELEASE" && tag.value !== null);
+
+    if (!releaseTag?.value) {
+        return undefined;
+    }
+
+    const value = Number.parseFloat(releaseTag.value);
+
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function extractRegionActions(tags: MarkerTag[]): RegionActionTag[] {

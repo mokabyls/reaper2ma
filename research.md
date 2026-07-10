@@ -107,14 +107,16 @@ The page has one primary workflow:
 9. In hybrid mode, markers inside regions become cues in a region sequence named from the region ID and label, for example `R2 - Introduction - Sub Region`. Region color creates the sequence appearance and marker color creates the cue appearance.
 10. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
 11. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
-12. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-13. Macro XML is always generated and downloaded as a single file.
-14. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
-15. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
+12. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; if no release is found, the generator inserts a tiny fallback release just after the start.
+13. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+14. Macro XML is always generated and downloaded as a single file.
+15. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
+16. Optional example macro presets can be exported separately from the same page, grouped by `Show time` and `Timecode control`, with a `Timecode Name` fallback to the imported CSV basename.
 
 The default settings are:
 
-- `sequenceNumber = 101`
+- `sequenceNumber = 9001`
+- `appearanceStartNumber = 9001`
 - `timecodeNumber = 1`
 - `pageNumber = 1`
 - `pageSlotStart = 201`
@@ -166,7 +168,9 @@ Bracket tags are parsed from leading or trailing `[]` blocks:
 
 - Leading blocks can carry metadata like `BPM_129.5`, `CueFade_6/12`, `FadeFromX_0.5`, or `Temp`.
 - Trailing blocks can override the execution token, for example `Intro [Go+]`.
-- Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, and `Flash`.
+- Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, `TempRelease`, `Flash`, and `FlashRelease`.
+- `Temp|Release_250` and `Flash|Release_120` create bump starts with an inline release delay in milliseconds.
+- `TempRelease` and `FlashRelease` close the most recent unmatched bump start of the same kind, using a stack per color in bump mode.
 - Cue timing tags are emitted on the generated macro line as `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...`.
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
 - Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to cue 1 on the target region track. `OFF` maps to an `Off` event on the target region track without cue assignment. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.

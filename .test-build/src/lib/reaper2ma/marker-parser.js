@@ -10,8 +10,12 @@ const CANONICAL_EXECUTION_TOKENS = {
     on: "On",
     select: "Select",
     top: "Top",
+    bump: "Temp",
     temp: "Temp",
     flash: "Flash",
+    bumprelease: "TempRelease",
+    temprelease: "TempRelease",
+    flashrelease: "FlashRelease",
 };
 const GLOBAL_SCOPE_TAGS = new Set(["GLOBAL", "MAIN"]);
 const markerTagProviderRegistry = createDefaultMarkerTagProviderRegistry();
@@ -27,11 +31,13 @@ export function parseMarkerName(name) {
     const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag)));
     const isGlobal = tags.some(isGlobalScopeTag);
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
+    const bumpAction = parseBumpAction(execToken, tags);
     return {
         displayName,
         execToken,
         tags,
         ...(isGlobal ? { isGlobal } : {}),
+        ...(bumpAction ? { bumpAction } : {}),
         ...(regionActions.length > 0
             ? {
                 regionActions,
@@ -92,6 +98,7 @@ export function normalizeMarkerRows(rows) {
             execToken: marker.execToken,
             tags: markerTags,
             ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
+            ...(marker.bumpAction ? { bumpAction: marker.bumpAction } : {}),
             ...(marker.regionActions && marker.regionActions.length > 0
                 ? {
                     regionActions: marker.regionActions,
@@ -234,6 +241,32 @@ function isGlobalScopeTag(tag) {
         return false;
     }
     return GLOBAL_SCOPE_TAGS.has(tag.key.trim().toUpperCase());
+}
+function parseBumpAction(execToken, tags) {
+    const normalizedExecToken = execToken.trim().toLowerCase();
+    if (normalizedExecToken !== "temp" && normalizedExecToken !== "flash" && normalizedExecToken !== "temprelease" && normalizedExecToken !== "flashrelease") {
+        return undefined;
+    }
+    if (normalizedExecToken === "temprelease" || normalizedExecToken === "flashrelease") {
+        return {
+            kind: normalizedExecToken === "temprelease" ? "Temp" : "Flash",
+            phase: "release",
+        };
+    }
+    const releaseDelayMs = parseReleaseDelayMs(tags);
+    return {
+        kind: normalizedExecToken === "temp" ? "Temp" : "Flash",
+        phase: "start",
+        ...(releaseDelayMs !== undefined ? { releaseDelayMs } : {}),
+    };
+}
+function parseReleaseDelayMs(tags) {
+    const releaseTag = tags.find((tag) => tag.key.trim().toUpperCase() === "RELEASE" && tag.value !== null);
+    if (!releaseTag?.value) {
+        return undefined;
+    }
+    const value = Number.parseFloat(releaseTag.value);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 function extractRegionActions(tags) {
     return tags.flatMap((tag) => {

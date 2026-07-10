@@ -1,5 +1,6 @@
 import type {
     BumpSequence,
+    BumpActionTag,
     AppearanceReference,
     ConvertedMarker,
     CueTimingTag,
@@ -16,8 +17,8 @@ export function splitMarkerRows(markers: ConvertedMarker[]): {
     repeatedMarkers: ConvertedMarker[];
     bumpMarkers: ConvertedMarker[];
 } {
-    const bumpMarkers = markers.filter((marker) => isBumpExecutionToken(marker.execToken));
-    const nonBumpMarkers = markers.filter((marker) => !isBumpExecutionToken(marker.execToken));
+    const bumpMarkers = markers.filter((marker) => isBumpMarker(marker));
+    const nonBumpMarkers = markers.filter((marker) => !isBumpMarker(marker));
 
     return {
         uniqueCues: nonBumpMarkers.filter((marker) => !marker.color),
@@ -158,91 +159,91 @@ export function groupBumpSequences(
         {
             sequence: BumpSequence;
             cueNumbersByName: Map<string, number>;
+            kind: "Temp" | "Flash";
         }
     >();
+    const openStartsByColorAndKind = new Map<string, Array<{ sequence: BumpSequence; timestamp: string; kind: "Temp" | "Flash" }>>();
     const usedSequenceNames = new Map<string, number>();
     let nextSequenceNumber = sequenceNumber + 1;
 
     for (const marker of bumpMarkers) {
-        const sequenceKey = `${marker.color}::${marker.displayName}`;
-        const existing = sequencesByKey.get(sequenceKey);
+        const bumpAction = marker.bumpAction ?? inferBumpActionFromExecToken(marker.execToken);
 
-        if (existing) {
-            existing.sequence.events.push({
-                timestamp: marker.start,
-                execToken: marker.execToken,
-                cueNumber: 1,
-                cueName: START_CUE_NAME,
-                ...(marker.regionActions?.length
-                    ? {
-                          regionActions: marker.regionActions,
-                      }
-                    : {}),
-                ...(marker.cueFade !== undefined
-                    ? {
-                          cueFade: marker.cueFade,
-                      }
-                    : {}),
-                ...(marker.cueTiming !== undefined
-                    ? {
-                          cueTiming: marker.cueTiming,
-                      }
-                    : {}),
-            });
+        if (!bumpAction) {
             continue;
         }
 
-        const baseSequenceName = baseSequenceNamesByColor.get(marker.color) ?? prefix;
-        const bumpSequence: BumpSequence = {
-            color: marker.color,
-            displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
-            cues: [
-                {
-                    cueNumber: 1,
-                    name: START_CUE_NAME,
-                    ...(marker.cueFade !== undefined
-                        ? {
-                              cueFade: marker.cueFade,
-                          }
-                        : {}),
-                    ...(marker.cueTiming !== undefined
-                        ? {
-                              cueTiming: marker.cueTiming,
-                          }
-                        : {}),
-                },
-            ],
-            events: [
-                {
-                    timestamp: marker.start,
-                    execToken: marker.execToken,
-                    cueNumber: 1,
-                    cueName: START_CUE_NAME,
-                    ...(marker.regionActions?.length
-                        ? {
-                              regionActions: marker.regionActions,
-                          }
-                        : {}),
-                    ...(marker.cueFade !== undefined
-                        ? {
-                              cueFade: marker.cueFade,
-                          }
-                        : {}),
-                    ...(marker.cueTiming !== undefined
-                        ? {
-                              cueTiming: marker.cueTiming,
-                          }
-                        : {}),
-                },
-            ],
-            sequenceNumber: nextSequenceNumber++,
-        };
+        if (bumpAction.phase === "release") {
+            const openStarts = openStartsByColorAndKind.get(createBumpStackKey(marker.color, bumpAction.kind));
+            const openStart = openStarts?.pop();
 
-        sequencesByKey.set(sequenceKey, {
-            sequence: bumpSequence,
-            cueNumbersByName: new Map<string, number>([[START_CUE_NAME, 1]]),
+            if (!openStart) {
+                continue;
+            }
+
+            pushBumpReleaseEvent(openStart.sequence, marker.start);
+            continue;
+        }
+
+        const sequenceKey = `${marker.color}::${marker.displayName}`;
+        let existing = sequencesByKey.get(sequenceKey);
+
+        if (!existing) {
+            const baseSequenceName = baseSequenceNamesByColor.get(marker.color) ?? prefix;
+            const bumpSequence: BumpSequence = {
+                color: marker.color,
+                displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
+                cues: [
+                    {
+                        cueNumber: 1,
+                        name: START_CUE_NAME,
+                        ...(marker.cueFade !== undefined
+                            ? {
+                                  cueFade: marker.cueFade,
+                              }
+                            : {}),
+                        ...(marker.cueTiming !== undefined
+                            ? {
+                                  cueTiming: marker.cueTiming,
+                              }
+                            : {}),
+                    },
+                ],
+                events: [],
+                sequenceNumber: nextSequenceNumber++,
+            };
+
+            existing = {
+                sequence: bumpSequence,
+                cueNumbersByName: new Map<string, number>([[START_CUE_NAME, 1]]),
+                kind: bumpAction.kind,
+            };
+
+            sequencesByKey.set(sequenceKey, existing);
+            bumpSequences.push(bumpSequence);
+        }
+
+        pushBumpStartEvent(existing.sequence, marker, bumpAction.kind);
+
+        if (bumpAction.releaseDelayMs !== undefined) {
+            pushBumpReleaseEvent(existing.sequence, offsetTimestampByMilliseconds(marker.start, bumpAction.releaseDelayMs));
+            continue;
+        }
+
+        const stackKey = createBumpStackKey(marker.color, bumpAction.kind);
+        const openStarts = openStartsByColorAndKind.get(stackKey) ?? [];
+        openStarts.push({
+            sequence: existing.sequence,
+            timestamp: marker.start,
+            kind: bumpAction.kind,
         });
-        bumpSequences.push(bumpSequence);
+        openStartsByColorAndKind.set(stackKey, openStarts);
+    }
+
+    for (const openStarts of openStartsByColorAndKind.values()) {
+        for (const openStart of openStarts) {
+            pushBumpReleaseEvent(openStart.sequence, offsetTimestampByMilliseconds(openStart.timestamp, DEFAULT_BUMP_RELEASE_EPSILON_MS));
+        }
     }
 
     return bumpSequences;
@@ -290,13 +291,6 @@ function createUniqueSequenceName(name: string, usedSequenceNames: Map<string, n
     return `${name} ${currentCount + 1}`;
 }
 
-function isBumpExecutionToken(execToken: string): boolean {
-    return execToken
-        .split("|")
-        .map((part) => part.trim().toLowerCase())
-        .some((part) => part === "temp" || part === "flash");
-}
-
 function resolveSequenceCueNumber(
     existing: {
         sequence: RepeatedSequence;
@@ -335,4 +329,91 @@ function resolveSequenceCueNumber(
 
 function resolveCueName(cues: SequenceCue[], cueNumber: number): string {
     return cues.find((cue) => cue.cueNumber === cueNumber)?.name ?? START_CUE_NAME;
+}
+
+function isBumpMarker(marker: ConvertedMarker): boolean {
+    return isBumpExecutionToken(marker.execToken) || isBumpReleaseExecutionToken(marker.execToken) || marker.bumpAction !== undefined;
+}
+
+function isBumpExecutionToken(execToken: string): boolean {
+    return execToken
+        .split("|")
+        .map((part) => part.trim().toLowerCase())
+        .some((part) => part === "temp" || part === "flash");
+}
+
+function isBumpReleaseExecutionToken(execToken: string): boolean {
+    return execToken
+        .split("|")
+        .map((part) => part.trim().toLowerCase())
+        .some((part) => part === "temprelease" || part === "flashrelease");
+}
+
+const DEFAULT_BUMP_RELEASE_EPSILON_MS = 1;
+
+function createBumpStackKey(color: string, kind: "Temp" | "Flash"): string {
+    return `${color}::${kind}`;
+}
+
+function pushBumpStartEvent(sequence: BumpSequence, marker: ConvertedMarker, kind: "Temp" | "Flash"): void {
+    sequence.events.push({
+        timestamp: marker.start,
+        execToken: kind,
+        cueNumber: 1,
+        cueName: START_CUE_NAME,
+        ...(marker.regionActions?.length
+            ? {
+                  regionActions: marker.regionActions,
+              }
+            : {}),
+        ...(marker.cueFade !== undefined
+            ? {
+                  cueFade: marker.cueFade,
+              }
+            : {}),
+        ...(marker.cueTiming !== undefined
+            ? {
+                  cueTiming: marker.cueTiming,
+              }
+            : {}),
+    });
+}
+
+function pushBumpReleaseEvent(sequence: BumpSequence, timestamp: string): void {
+    sequence.events.push({
+        timestamp,
+        execToken: "Off",
+        cueNumber: 1,
+        cueName: START_CUE_NAME,
+    });
+}
+
+function inferBumpActionFromExecToken(execToken: string): BumpActionTag | undefined {
+    const normalized = execToken.trim().toLowerCase();
+
+    if (normalized === "temp" || normalized === "flash") {
+        return {
+            kind: normalized === "temp" ? "Temp" : "Flash",
+            phase: "start",
+        };
+    }
+
+    if (normalized === "temprelease" || normalized === "flashrelease") {
+        return {
+            kind: normalized === "temprelease" ? "Temp" : "Flash",
+            phase: "release",
+        };
+    }
+
+    return undefined;
+}
+
+function offsetTimestampByMilliseconds(timestamp: string, milliseconds: number): string {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+
+    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
 }

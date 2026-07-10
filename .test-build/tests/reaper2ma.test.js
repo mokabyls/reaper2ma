@@ -17,8 +17,8 @@ import { fadeFromTagProvider } from "../src/lib/reaper2ma/providers/fade-from.js
 import { fadeToTagProvider } from "../src/lib/reaper2ma/providers/fade-to.js";
 import { groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseMarkerExecution, parseMarkerName, parseReaperMarkerRows, sanitizeMarkerName, splitMarkerRows } from "../src/lib/reaper2ma/markers.js";
 const baseSettings = {
-    sequenceNumber: 101,
-    appearanceStartNumber: 1,
+    sequenceNumber: 9001,
+    appearanceStartNumber: 9001,
     sequenceNamePrefix: "MA",
     timecodeNumber: 1,
     pageNumber: 1,
@@ -79,6 +79,10 @@ describe("marker normalization", () => {
                 { key: "BPM", value: "129.5" },
                 { key: "X", value: "foo" },
             ],
+            bumpAction: {
+                kind: "Temp",
+                phase: "start",
+            },
             bpm: 129.5,
             bpmText: "129.5",
         });
@@ -99,17 +103,29 @@ describe("marker normalization", () => {
                 { key: "CUEFADE", value: "6/12" },
                 { key: "X", value: "foo" },
             ],
+            bumpAction: {
+                kind: "Temp",
+                phase: "start",
+            },
             cueFade: "6/12",
         });
         assert.deepEqual(parseMarkerName("[TEMP] Intro"), {
             displayName: "Intro",
             execToken: "Temp",
             tags: [],
+            bumpAction: {
+                kind: "Temp",
+                phase: "start",
+            },
         });
         assert.deepEqual(parseMarkerName("[TEMP] Intro [Flash]"), {
             displayName: "Intro",
             execToken: "Flash",
             tags: [],
+            bumpAction: {
+                kind: "Flash",
+                phase: "start",
+            },
         });
         assert.deepEqual(parseMarkerName("[FadeFromX_0.5|FadeToX_1.2|DelayFromY_0.25|DelayToZ_2] Intro"), {
             displayName: "Intro",
@@ -131,6 +147,66 @@ describe("marker normalization", () => {
             displayName: "Intro",
             execToken: "Go+",
             tags: [{ key: "FADEFROMA", value: "0.5" }],
+        });
+        assert.deepEqual(parseMarkerName("[Temp|Release_250] Intro"), {
+            displayName: "Intro",
+            execToken: "Temp",
+            tags: [
+                { key: "RELEASE", value: "250" },
+            ],
+            bumpAction: {
+                kind: "Temp",
+                phase: "start",
+                releaseDelayMs: 250,
+            },
+        });
+        assert.deepEqual(parseMarkerName("[Flash|Release_120] Intro"), {
+            displayName: "Intro",
+            execToken: "Flash",
+            tags: [
+                { key: "RELEASE", value: "120" },
+            ],
+            bumpAction: {
+                kind: "Flash",
+                phase: "start",
+                releaseDelayMs: 120,
+            },
+        });
+        assert.deepEqual(parseMarkerName("[BUMP|Release_250|FadeFromX_0|FadeFromY_1] Blanc"), {
+            displayName: "Blanc",
+            execToken: "Temp",
+            tags: [
+                { key: "RELEASE", value: "250" },
+                { key: "FADEFROMX", value: "0" },
+                { key: "FADEFROMY", value: "1" },
+            ],
+            bumpAction: {
+                kind: "Temp",
+                phase: "start",
+                releaseDelayMs: 250,
+            },
+            cueTiming: [
+                { key: "FadeFromX", value: "0" },
+                { key: "FadeFromY", value: "1" },
+            ],
+        });
+        assert.deepEqual(parseMarkerName("[TempRelease] Intro"), {
+            displayName: "Intro",
+            execToken: "TempRelease",
+            tags: [],
+            bumpAction: {
+                kind: "Temp",
+                phase: "release",
+            },
+        });
+        assert.deepEqual(parseMarkerName("[FlashRelease] Intro"), {
+            displayName: "Intro",
+            execToken: "FlashRelease",
+            tags: [],
+            bumpAction: {
+                kind: "Flash",
+                phase: "release",
+            },
         });
         assert.deepEqual(parseMarkerName("[GLOBAL] Intro"), {
             displayName: "Intro",
@@ -254,6 +330,8 @@ describe("marker normalization", () => {
                 events: [
                     { timestamp: "5", execToken: "Temp", cueNumber: 1, cueName: "Start" },
                     { timestamp: "7", execToken: "Flash", cueNumber: 1, cueName: "Start" },
+                    { timestamp: "5.001", execToken: "Off", cueNumber: 1, cueName: "Start" },
+                    { timestamp: "7.001", execToken: "Off", cueNumber: 1, cueName: "Start" },
                 ],
             },
             {
@@ -261,7 +339,10 @@ describe("marker normalization", () => {
                 displayName: "1 - Verse - BUMP - HIT",
                 cues: [{ cueNumber: 1, name: "Start" }],
                 sequenceNumber: 105,
-                events: [{ timestamp: "9", execToken: "Temp", cueNumber: 1, cueName: "Start" }],
+                events: [
+                    { timestamp: "9", execToken: "Temp", cueNumber: 1, cueName: "Start" },
+                    { timestamp: "9.001", execToken: "Off", cueNumber: 1, cueName: "Start" },
+                ],
             },
         ]);
     });
@@ -282,14 +363,14 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.repeatedSequences.length, 2);
         assert.equal(artifacts.bumpSequences.length, 0);
         assert.equal(artifacts.bpmSequence, undefined);
-        assert.equal(commands.includes("Store Appearance 1"), true);
-        assert.equal(commands.includes('Label Appearance 1 "R2MA Color 19005190"'), true);
-        assert.equal(commands.includes('Set Appearance 1 COLOR="1,1,1,0" BackR=33 BackG=255 BackB=6 BackAlpha=221'), true);
-        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 "MA Sequence 101"'), true);
-        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 "MA Sequence 101"'), true);
+        assert.equal(commands.includes("Store Appearance 9001"), true);
+        assert.equal(commands.includes('Label Appearance 9001 "R2MA Color 19005190"'), true);
+        assert.equal(commands.includes('Set Appearance 9001 COLOR="1,1,1,0" BackR=33 BackG=255 BackB=6 BackAlpha=221'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 "MA Sequence 9001"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 "MA Sequence 9001"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 2 APPEARANCE="R2MA Color 19005190"'), true);
-        assert.equal(commands.includes("Store Appearance 2"), true);
-        assert.equal(commands.includes('Label Appearance 2 "R2MA Color 33554431"'), true);
+        assert.equal(commands.includes("Store Appearance 9002"), true);
+        assert.equal(commands.includes('Label Appearance 9002 "R2MA Color 33554431"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 3 APPEARANCE="R2MA Color 33554431"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 Cue 1 "Intro"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 Cue 2 "Intro 2"'), true);
@@ -318,7 +399,7 @@ describe("conversion artifacts", () => {
         assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 1 Cue 2 At Timecode 1.1.1.1.1.2'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 1 At Page 1.201'), true);
-        assert.equal(commands.includes('Move DataPool "R2MA songcsv" Sequence 1 Thru At Sequence 101'), true);
+        assert.equal(commands.includes('Move DataPool "R2MA songcsv" Sequence 1 Thru At Sequence 9001'), true);
         assert.equal(commands.includes('Move DataPool "R2MA songcsv" Timecode 1 Thru At Timecode 1'), true);
         assert.equal(commands.includes('Delete DataPool "R2MA songcsv" /NoConfirm'), true);
         assert.equal(artifacts.macroXml.includes("GMA3.Timecode"), false);
@@ -367,32 +448,39 @@ describe("conversion artifacts", () => {
             sequenceNumber: sequence.sequenceNumber,
             cues: sequence.cues.map((cue) => cue.name),
         })), [
-            { regionId: "R1", displayName: "MA R1 - Introduction", sequenceNumber: 102, cues: ["Introduction"] },
+            { regionId: "R1", displayName: "MA R1 - Introduction", sequenceNumber: 9002, cues: ["Introduction"] },
             {
                 regionId: "R2",
                 displayName: "MA R2 - Introduction - Sub Region",
-                sequenceNumber: 103,
-                cues: ["Début Billy", "Billy A Cet Age", "Blanc", "Intro Musique", "Montée", "Fin montée"],
+                sequenceNumber: 9003,
+                cues: ["Début Billy", "Billy A Cet Age", "Intro Musique", "Montée", "Fin montée"],
             },
         ]);
         assert.equal(artifacts.repeatedSequences.length, 1);
         assert.equal(artifacts.repeatedSequences[0].displayName, "MA 1 - Harry Potter Deb");
-        assert.equal(artifacts.bumpSequences.length, 0);
-        assert.equal(artifacts.bpmSequence?.sequenceNumber, 105);
+        assert.equal(artifacts.bumpSequences.length, 1);
+        assert.equal(artifacts.bumpSequences[0].displayName, "MA 1 - BUMP - Blanc");
+        assert.equal(artifacts.bumpSequences[0].events[0].timestamp, "13.810");
+        assert.equal(artifacts.bumpSequences[0].events[1].timestamp, "14.060");
+        assert.equal(artifacts.bpmSequence?.sequenceNumber, 9006);
         assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 1 "MA R1 - Introduction"`), true);
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 1 "MA R1 - Introduction"`), true);
         assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 2 "MA R2 - Introduction - Sub Region"`), true);
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 "MA R2 - Introduction - Sub Region"`), true);
-        assert.equal(commands.includes("Store Appearance 1"), true);
-        assert.equal(commands.includes('Set Appearance 1 COLOR="1,1,1,0" BackR=217 BackG=61 BackB=0 BackAlpha=221'), true);
+        assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 4 "MA 1 - BUMP - Blanc"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 4 "MA 1 - BUMP - Blanc"`), true);
+        assert.equal(commands.includes("Store Appearance 9001"), true);
+        assert.equal(commands.includes('Set Appearance 9001 COLOR="1,1,1,0" BackR=217 BackG=61 BackB=0 BackAlpha=221'), true);
         assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 2 Cue 4 APPEARANCE="R2MA Color F2FF00"`), true);
-        assert.equal(commands.includes('Set Appearance 2 COLOR="1,1,1,0" BackR=242 BackG=255 BackB=0 BackAlpha=221'), true);
+        assert.equal(commands.includes('Set Appearance 9002 COLOR="1,1,1,0" BackR=242 BackG=255 BackB=0 BackAlpha=221'), true);
         assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 3 APPEARANCE="R2MA Color 00BFFF"`), true);
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 1 "Début Billy"`), true);
-        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 5 "Montée"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 4 "Montée"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 5 "Fin montée"`), true);
         assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Timecode 1`), true);
         assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1`), true);
-        assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Sequence 1 Thru At Sequence 102`), true);
+        assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 4 Cue 1 At Timecode 1.1.4.1.1.1`), true);
+        assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Sequence 1 Thru At Sequence 9002`), true);
         assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Timecode 1 Thru At Timecode 1`), true);
         assert.deepEqual(createConversionOutputFiles(artifacts).map((file) => file.name), ["testbillymarkerswithoutmpregionsmarkers_macro.xml"]);
     });
@@ -482,8 +570,9 @@ R2,Region Two,5,10,5,
     it("ignores region rows in markers-only mode", () => {
         const artifacts = convertReaperCsvToArtifacts(regionFixtureCsv, "test-billy-markers-without-mp3_regions_markers.csv", baseSettings);
         assert.equal(artifacts.regionSequences.length, 0);
-        assert.equal(artifacts.uniqueCues.length, 4);
+        assert.equal(artifacts.uniqueCues.length, 3);
         assert.equal(artifacts.repeatedSequences.length, 2);
+        assert.equal(artifacts.bumpSequences.length, 1);
     });
     it("creates standalone example macro exports by group with a CSV filename fallback", () => {
         const outputFiles = createExampleMacroPresetOutputFiles({
@@ -535,7 +624,7 @@ R2,Region Two,5,10,5,
         assert.equal(commands.includes('Store Type "CmdSubTrack" 1'), false);
         assert.equal(commands.includes('Move DataPool "R2MA demo" Timecode 1 Thru At Timecode 1'), false);
         assert.equal(commands.includes('Assign DataPool "R2MA demo" Sequence 1 At Page 1.201'), true);
-        assert.equal(commands.includes('Move DataPool "R2MA demo" Sequence 1 Thru At Sequence 101'), true);
+        assert.equal(commands.includes('Move DataPool "R2MA demo" Sequence 1 Thru At Sequence 9001'), true);
     });
     it("keeps the current file name normalization semantics", () => {
         assert.equal(normalizeOutputBaseName("Song 01.CSV"), "songcsv");
@@ -601,7 +690,7 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.uniqueCues.length, 2);
         assert.equal(artifacts.repeatedSequences.length, 1);
         assert.equal(artifacts.bumpSequences.length, 0);
-        assert.equal(artifacts.bpmSequence?.sequenceNumber, 103);
+        assert.equal(artifacts.bpmSequence?.sequenceNumber, 9003);
         assert.equal(artifacts.bpmSequence?.displayName, "MA BPM");
         assert.equal(artifacts.bpmSequence?.events.length, 2);
         assert.equal(commands.includes('Set DataPool "R2MA bpm" Sequence 3 Property "SpeedMaster" #[Master 3.4]'), true);
@@ -682,6 +771,31 @@ R2,Region Two,5,10,5,
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Store DataPool "R2MA bump" Sequence 4 "MA 1 - Verse - BUMP - HIT"'), true);
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
     });
+    it("emits bump release events from inline, paired and fallback release tags", () => {
+        const inlineCsv = `#,Name,Start,Color
+1,[Temp|Release_250] HIT,0,19005190
+`;
+        const pairedCsv = `#,Name,Start,Color
+1,[Temp] HIT,0,19005190
+2,[TempRelease] Release,0.75,19005190
+`;
+        const fallbackCsv = `#,Name,Start,Color
+1,[Temp] HIT,0,19005190
+`;
+        const inlineCommands = getMacroCommands(convertReaperCsvToArtifacts(inlineCsv, "inline.csv", baseSettings).macroXml);
+        const pairedCommands = getMacroCommands(convertReaperCsvToArtifacts(pairedCsv, "paired.csv", baseSettings).macroXml);
+        const fallbackCommands = getMacroCommands(convertReaperCsvToArtifacts(fallbackCsv, "fallback.csv", baseSettings).macroXml);
+        assert.equal(inlineCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(inlineCommands.includes('Set 2 "TOKEN" "Off"'), true);
+        assert.equal(inlineCommands.includes('Assign DataPool "R2MA inline" Sequence 1 Cue 1 At Timecode 1.1.1.1.1.2'), true);
+        assert.equal(pairedCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(pairedCommands.includes('Set 2 "TOKEN" "Off"'), true);
+        assert.equal(pairedCommands.includes('Assign DataPool "R2MA paired" Sequence 1 Cue 1 At Timecode 1.1.1.1.1.2'), true);
+        assert.equal(fallbackCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(fallbackCommands.includes('Set 2 "TOKEN" "Off"'), true);
+        assert.equal(fallbackCommands.includes('Set 2 "TIME" "0.001"'), true);
+        assert.equal(fallbackCommands.includes('Assign DataPool "R2MA fallback" Sequence 1 Cue 1 At Timecode 1.1.1.1.1.2'), true);
+    });
     it("warns when the main sequence is empty", () => {
         const csv = `#,Name,Start,Color
 1,SD,0,19005190
@@ -691,7 +805,7 @@ R2,Region Two,5,10,5,
         const preview = createConversionPreview(artifacts, 2);
         assert.equal(preview.warnings.some((warning) => warning.includes("séquence principale")), true);
         assert.equal(artifacts.macroXml.includes("Cue 1 thru 0"), false);
-        assert.equal(artifacts.macroXml.includes('Sequence 101 Property &quot;SpeedMaster&quot;'), false);
+        assert.equal(artifacts.macroXml.includes('Sequence 9001 Property &quot;SpeedMaster&quot;'), false);
     });
 });
 describe("reaper transport macro library", () => {

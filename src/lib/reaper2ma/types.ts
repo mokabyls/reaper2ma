@@ -25,6 +25,12 @@ export type RegionActionTag = {
     regionId: string;
 };
 
+export type BumpActionTag = {
+    kind: "Temp" | "Flash";
+    phase: "start" | "release";
+    releaseDelayMs?: number;
+};
+
 export type CueTimingTagKey =
     | "FadeFromX"
     | "FadeFromY"
@@ -55,6 +61,7 @@ export type ConvertedMarker = {
     execToken: string;
     tags: MarkerTag[];
     isGlobal?: boolean;
+    bumpAction?: BumpActionTag;
     regionActions?: RegionActionTag[];
     start: string;
     color: string;

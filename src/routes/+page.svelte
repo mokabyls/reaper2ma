@@ -24,8 +24,8 @@
     let activeStep = 1;
     let selectedCsvText = "";
     let selectedMarkerCount = 0;
-    let sequenceNumber = 101;
-    let appearanceStartNumber = 1;
+    let sequenceNumber = 9001;
+    let appearanceStartNumber = 9001;
     let sequenceNamePrefix = "MA";
     let timecodeNumber = 1;
     let pageNumber = 1;
@@ -804,6 +804,11 @@
                             <div class="usage-title">Bump overlays</div>
                             <code>[Temp] HIT</code>
                             <p><code>Temp</code> and <code>Flash</code> create bump sequences for overlays.</p>
+                        </div>
+                        <div class="usage-item">
+                            <div class="usage-title">Bump release</div>
+                            <code>[Temp|Release_250] / [TempRelease]</code>
+                            <p><code>Release_...</code> sets a delay in milliseconds; <code>TempRelease</code> or <code>FlashRelease</code> closes the latest unmatched bump.</p>
                         </div>
                         <div class="usage-item">
                             <div class="usage-title">Cue timing</div>

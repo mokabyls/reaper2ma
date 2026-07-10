@@ -42,7 +42,7 @@ export function parseRegions(rows: ReaperRegionRow[]): ParsedRegion[] {
 
 export function assignMarkersToRegions(markers: ConvertedMarker[], regions: ParsedRegion[]): ConvertedMarker[] {
     return markers.map((marker) => {
-        if (marker.isGlobal) {
+        if (marker.isGlobal || marker.bumpAction !== undefined) {
             return marker;
         }
 

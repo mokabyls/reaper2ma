@@ -2,6 +2,7 @@
     import { onDestroy, onMount, tick } from "svelte";
     import {
         convertReaperCsvToArtifacts,
+        convertReaperColorToCssColor,
         createConversionPreview,
         createExportBundleFiles,
         createTimestampedZipFileName,
@@ -129,6 +130,13 @@
     const TIMELINE_TIME_EPSILON = 0.001;
     const SETTINGS_STORAGE_KEY = "reaper2ma:settings:v1";
     const SETTINGS_STORAGE_VERSION = 1;
+    const EXECUTOR_PREVIEW_FALLBACK_COLORS = {
+        Main: "#00d45a",
+        Region: "#20c7d8",
+        Layer: "#ff7ab6",
+        Repeat: "#f5d000",
+        Bump: "#f59e0b",
+    } as const;
     const wizardSteps = [
         {
             id: 1,
@@ -287,6 +295,7 @@
         cueCount: number;
         eventCount: number;
         appearanceName: string;
+        color: string;
         executorSlotGroup: "main" | "bump";
     };
 
@@ -864,6 +873,7 @@
                 cueCount: artifacts.uniqueCues.length,
                 eventCount: artifacts.uniqueCues.length,
                 appearanceName: "Default",
+                color: resolveExecutorPreviewColor("Main", ""),
                 executorSlotGroup: "main",
             });
         }
@@ -877,6 +887,7 @@
                     cueCount: sequence.cues.length,
                     eventCount: sequence.events.length,
                     appearanceName: sequence.appearanceName ?? "Default",
+                    color: resolveExecutorPreviewColor("Region", sequence.color),
                     executorSlotGroup: "main" as const,
                 },
                 ...artifacts.regionLayerSequences
@@ -888,6 +899,7 @@
                         cueCount: layerSequence.cues.length,
                         eventCount: layerSequence.events.length,
                         appearanceName: layerSequence.appearanceName ?? "Cue appearances",
+                        color: resolveExecutorPreviewColor("Layer", layerSequence.color),
                         executorSlotGroup: "main" as const,
                     })),
             ]),
@@ -898,6 +910,7 @@
                 cueCount: sequence.cues.length,
                 eventCount: sequence.events.length,
                 appearanceName: sequence.appearanceName ?? "Default",
+                color: resolveExecutorPreviewColor("Repeat", sequence.color),
                 executorSlotGroup: "main" as const,
             })),
             ...artifacts.bumpSequences.map((sequence) => ({
@@ -907,6 +920,7 @@
                 cueCount: sequence.cues.length,
                 eventCount: sequence.events.length,
                 appearanceName: sequence.appearanceName ?? "Overlay",
+                color: resolveExecutorPreviewColor("Bump", sequence.color),
                 executorSlotGroup: "bump" as const,
             })),
         );
@@ -922,6 +936,10 @@
                 address: `Page ${targetPageNumber}.${slot}`,
             };
         });
+    }
+
+    function resolveExecutorPreviewColor(kind: keyof typeof EXECUTOR_PREVIEW_FALLBACK_COLORS, sourceColor: string): string {
+        return convertReaperColorToCssColor(sourceColor) ?? EXECUTOR_PREVIEW_FALLBACK_COLORS[kind];
     }
 
     function getMacroPresetSelection(): ExampleMacroPresetSelection {
@@ -1433,7 +1451,7 @@
                         {#if executorPreviewRows.length}
                             <div class="executor-strip" aria-label="Generated executor assignments">
                                 {#each executorPreviewRows as row}
-                                    <div class="executor-tile" class:main-executor={row.kind === "Main"} class:bump-executor={row.kind === "Bump"}>
+                                    <div class="executor-tile" style={`--executor-color: ${row.color};`}>
                                         <div class="executor-tile-top">
                                             <span>Seq {row.sequenceNumber}</span>
                                             <span>{row.kind}</span>
@@ -3667,17 +3685,9 @@
         gap: 0.45rem;
         padding: 0.65rem;
         border: 1px solid #4b4d55;
-        border-top: 3px solid var(--ma-yellow);
+        border-top: 3px solid var(--executor-color);
         border-radius: 4px;
         background: linear-gradient(180deg, #2b2c33, #18191e);
-    }
-
-    .executor-tile.main-executor {
-        border-top-color: var(--ma-green);
-    }
-
-    .executor-tile.bump-executor {
-        border-top-color: var(--accent-orange);
     }
 
     .executor-tile-top {

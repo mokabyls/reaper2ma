@@ -1,0 +1,1 @@
+{"version":3,"file":"settings.js","sourceRoot":"","sources":["../../../../src/lib/reaper2ma/settings.ts"],"names":[],"mappings":"AAAA,MAAM,UAAU,kBAAkB,CAAC,iBAAyB;IACxD,IAAI,CAAC,MAAM,CAAC,SAAS,CAAC,iBAAiB,CAAC,IAAI,iBAAiB,GAAG,CAAC,IAAI,iBAAiB,GAAG,EAAE,EAAE,CAAC;QAC1F,MAAM,IAAI,UAAU,CAAC,+CAA+C,CAAC,CAAC;IAC1E,CAAC;IAED,OAAO,KAAK,iBAAiB,EAAE,CAAC;AACpC,CAAC"}

@@ -15,6 +15,7 @@ import type {
 } from "./types.js";
 
 type MacroLine = Record<string, string>;
+type ExecutorSlotGroup = "main" | "bump";
 
 type GeneratedSequence = {
     localSequenceNumber: number;
@@ -23,6 +24,8 @@ type GeneratedSequence = {
     cues: SequenceCue[];
     events: SequenceTrigger[];
     hasOffCue: boolean;
+    assignToExecutor: boolean;
+    executorSlotGroup: ExecutorSlotGroup;
     appearanceName?: string;
     appearanceNumber?: number;
     appearanceColor?: string;
@@ -192,9 +195,16 @@ function createGeneratedSequences(
     bpmSequence: BpmSequence | undefined,
 ): GeneratedSequence[] {
     const generatedSequences: GeneratedSequence[] = [];
-    const addSequence = (sequence: Omit<GeneratedSequence, "localSequenceNumber">) => {
+    const addSequence = (
+        sequence: Omit<GeneratedSequence, "localSequenceNumber" | "assignToExecutor" | "executorSlotGroup"> & {
+            assignToExecutor?: boolean;
+            executorSlotGroup?: ExecutorSlotGroup;
+        },
+    ) => {
         generatedSequences.push({
             localSequenceNumber: generatedSequences.length + 1,
+            assignToExecutor: sequence.assignToExecutor ?? true,
+            executorSlotGroup: sequence.executorSlotGroup ?? "main",
             ...sequence,
         });
     };
@@ -260,6 +270,7 @@ function createGeneratedSequences(
             cues: sequence.cues,
             events: sequence.events,
             hasOffCue: true,
+            executorSlotGroup: "bump",
         });
     }
 
@@ -269,16 +280,30 @@ function createGeneratedSequences(
             displayName: bpmSequence.displayName,
             cues: bpmSequence.events.map((event, index) => ({
                 cueNumber: index + 1,
-                name: event.displayName.trim() || `Cue ${index + 1}`,
+                name: createBpmCueName(event.bpmText),
                 commands: [`Master ${settings.speedMaster} At BPM ${event.bpmText}`],
             })),
-            events: bpmSequence.events.map((event, index) => ({
-                timestamp: event.timestamp,
-                execToken: "Go+",
-                cueNumber: index + 1,
-                cueName: event.displayName.trim() || `Cue ${index + 1}`,
-            })),
+            events: bpmSequence.events.flatMap((event, index) => {
+                const cueNumber = index + 1;
+                const cueName = createBpmCueName(event.bpmText);
+
+                return [
+                    {
+                        timestamp: event.timestamp,
+                        execToken: "Temp",
+                        cueNumber,
+                        cueName,
+                    },
+                    {
+                        timestamp: offsetTimestampByMilliseconds(event.timestamp, 500),
+                        execToken: "TempRelease",
+                        cueNumber,
+                        cueName,
+                    },
+                ];
+            }),
             hasOffCue: false,
+            assignToExecutor: false,
         });
     }
 
@@ -458,11 +483,40 @@ function compareTimecodeMacroEvents(left: TimecodeMacroEvent, right: TimecodeMac
 }
 
 function createPageAssignmentCommands(settings: ConversionSettings, tempDataPoolName: string, sequences: GeneratedSequence[]): MacroLine[] {
-    return sequences.map((sequence, index) =>
-        createCommand(
-            `Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} At Page ${settings.pageNumber}.${settings.pageSlotStart + index}`,
-        ),
-    );
+    const executorOffsets: Record<ExecutorSlotGroup, number> = {
+        main: 0,
+        bump: 0,
+    };
+
+    return sequences.flatMap((sequence) => {
+        if (!sequence.assignToExecutor) {
+            return [];
+        }
+
+        const slotStart = sequence.executorSlotGroup === "bump" ? settings.bumpPageSlotStart : settings.pageSlotStart;
+        const slot = slotStart + executorOffsets[sequence.executorSlotGroup];
+        executorOffsets[sequence.executorSlotGroup] += 1;
+
+        return [
+            createCommand(
+                `Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} At Page ${settings.pageNumber}.${slot}`,
+            ),
+        ];
+    });
+}
+
+function createBpmCueName(bpmText: string): string {
+    return `BPM ${bpmText}`;
+}
+
+function offsetTimestampByMilliseconds(timestamp: string, milliseconds: number): string {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+
+    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
 }
 
 export function generateMacroXML(

@@ -28,7 +28,8 @@ export function parseMarkerName(name) {
     const { displayName: rawDisplayName, execToken: suffixExecToken } = parseExecutionSuffix(remainder);
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
     const regionActions = extractRegionActions(tags);
-    const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag)));
+    const regionTargetId = extractRegionTargetId(tags);
+    const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag) && !isRegionTargetTag(tag)));
     const isGlobal = tags.some(isGlobalScopeTag);
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
     const bumpAction = parseBumpAction(execToken, tags);
@@ -38,6 +39,7 @@ export function parseMarkerName(name) {
         tags,
         ...(isGlobal ? { isGlobal } : {}),
         ...(bumpAction ? { bumpAction } : {}),
+        ...(regionTargetId ? { regionTargetId } : {}),
         ...(regionActions.length > 0
             ? {
                 regionActions,
@@ -68,10 +70,10 @@ export function parseMarkerExecution(name) {
         execToken: parsedMarker.execToken,
     };
 }
-export function parseReaperMarkerRows(dataString) {
+export function parseReaperMarkerCsv(dataString) {
     const parsedLines = csv.parse(dataString);
     const header = parsedLines[0] ?? [];
-    return parsedLines.slice(1).map((row) => {
+    const rows = parsedLines.slice(1).map((row) => {
         const obj = {};
         row.forEach((value, index) => {
             const key = header[index];
@@ -88,17 +90,25 @@ export function parseReaperMarkerRows(dataString) {
             Color: obj.Color ?? "",
         };
     });
+    return {
+        headers: header,
+        rows,
+    };
+}
+export function parseReaperMarkerRows(dataString) {
+    return parseReaperMarkerCsv(dataString).rows;
 }
 export function normalizeMarkerRows(rows) {
     return rows.map((row) => {
         const marker = parseMarkerName(row.Name);
-        const markerTags = marker.tags.filter((tag) => !isRegionActionTag(tag));
+        const markerTags = marker.tags.filter((tag) => !isRegionActionTag(tag) && !isRegionTargetTag(tag));
         return {
             displayName: marker.displayName,
             execToken: marker.execToken,
             tags: markerTags,
             ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
             ...(marker.bumpAction ? { bumpAction: marker.bumpAction } : {}),
+            ...(marker.regionTargetId ? { regionTargetId: marker.regionTargetId } : {}),
             ...(marker.regionActions && marker.regionActions.length > 0
                 ? {
                     regionActions: marker.regionActions,
@@ -236,6 +246,12 @@ function isRegionActionTag(tag) {
     const key = tag.key.trim().toUpperCase();
     return key === "ON" || key === "OFF";
 }
+function isRegionTargetTag(tag) {
+    if (tag.value !== null) {
+        return false;
+    }
+    return /^R\d+$/.test(tag.key.trim().toUpperCase());
+}
 function isGlobalScopeTag(tag) {
     if (tag.value !== null) {
         return false;
@@ -284,5 +300,8 @@ function extractRegionActions(tags) {
             },
         ];
     });
+}
+function extractRegionTargetId(tags) {
+    return tags.find(isRegionTargetTag)?.key.trim().toUpperCase();
 }
 //# sourceMappingURL=marker-parser.js.map

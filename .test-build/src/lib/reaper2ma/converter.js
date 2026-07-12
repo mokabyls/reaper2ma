@@ -1,18 +1,20 @@
 import { createAppearanceNameFromReaperColor, convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
+import { validateReaperCsvRows } from "./csv-validation.js";
 import { assignMarkersToRegions, buildRegionSequences, parseRegions } from "./region-services.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
-import { createBpmSequence, groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerRows, isRegionRow, splitMarkerRows, } from "./markers.js";
+import { createBpmSequence, groupBumpSequences, groupRepeatedSequences, normalizeMarkerRows, parseReaperMarkerCsv, isRegionRow, splitMarkerRows, } from "./markers.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
 import { generateMacroXML } from "./xml.js";
 export function convertReaperMarkersToArtifacts(normalizedMarkers, sourceFileName, settings) {
-    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], sourceFileName, settings);
+    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], sourceFileName, settings, []);
 }
 export function convertReaperCsvToArtifacts(dataString, sourceFileName, settings) {
-    const rows = parseReaperMarkerRows(dataString);
+    const { headers, rows } = parseReaperMarkerCsv(dataString);
+    const validationWarnings = validateReaperCsvRows(headers, rows);
     const regionRows = settings.importMode === "regions-and-markers" ? rows.filter(isRegionRow) : [];
     const markerRows = rows.filter((row) => !isRegionRow(row));
     const normalizedMarkers = normalizeMarkerRows(markerRows);
-    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings);
+    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings, validationWarnings);
 }
 export function createConversionOutputFiles(artifacts) {
     return [
@@ -22,15 +24,15 @@ export function createConversionOutputFiles(artifacts) {
         },
     ];
 }
-function convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings) {
+function convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings, validationWarnings) {
     const appearanceRegistry = createAppearanceRegistry(settings.appearanceStartNumber);
     const outputBaseName = normalizeOutputBaseName(sourceFileName);
     if (settings.importMode === "regions-and-markers" && regionRows.length > 0) {
-        return convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry);
+        return convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry, validationWarnings);
     }
-    return convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry);
+    return convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry, validationWarnings);
 }
-function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry) {
+function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry, validationWarnings) {
     const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(normalizedMarkers);
     const repeatedSequences = groupRepeatedSequences(repeatedMarkers, settings.prefix, settings.sequenceNumber, appearanceRegistry.nextAppearanceNumber(), appearanceRegistry.resolveAppearance);
     const repeatedSequenceNamesByColor = new Map(repeatedSequences.map((sequence) => [sequence.color, sequence.displayName]));
@@ -42,6 +44,7 @@ function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
+        validationWarnings,
         regionSequences: prefixed.regionSequences,
         uniqueCues,
         repeatedSequences: prefixed.repeatedSequences,
@@ -50,7 +53,7 @@ function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings
         macroXml,
     };
 }
-function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry) {
+function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry, validationWarnings) {
     const regions = parseRegions(regionRows);
     const markersWithRegions = assignMarkersToRegions(normalizedMarkers, regions);
     const outsideRegionMarkers = markersWithRegions.filter((marker) => !marker.regionId);
@@ -66,6 +69,7 @@ function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, s
     return {
         importMode: settings.importMode ?? "regions-and-markers",
         outputBaseName,
+        validationWarnings,
         regionSequences: prefixed.regionSequences,
         uniqueCues,
         repeatedSequences: prefixed.repeatedSequences,

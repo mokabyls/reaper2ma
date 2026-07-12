@@ -33,7 +33,7 @@ export function createConversionPreview(artifacts: ConversionArtifacts, sourceMa
         ...(artifacts.bpmSequence ? [artifacts.bpmSequence.displayName] : []),
     ];
     const appearanceCount = collectAppearanceNumbers(artifacts).size;
-    const warnings: string[] = [];
+    const warnings: string[] = [...(artifacts.validationWarnings ?? [])];
 
     if (artifacts.uniqueCues.length === 0) {
         warnings.push("La séquence principale est vide: aucun cue ne sera créé dans la séquence de base.");

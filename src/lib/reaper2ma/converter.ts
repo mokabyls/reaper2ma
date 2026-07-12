@@ -1,4 +1,5 @@
 import { createAppearanceNameFromReaperColor, convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
+import { validateReaperCsvRows } from "./csv-validation.js";
 import { assignMarkersToRegions, buildRegionSequences, parseRegions } from "./region-services.js";
 import type { AppearanceReference, ConversionArtifacts, ConversionSettings, ConvertedMarker, ReaperRegionRow } from "./types.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
@@ -7,7 +8,7 @@ import {
     groupBumpSequences,
     groupRepeatedSequences,
     normalizeMarkerRows,
-    parseReaperMarkerRows,
+    parseReaperMarkerCsv,
     isRegionRow,
     splitMarkerRows,
 } from "./markers.js";
@@ -19,16 +20,17 @@ export function convertReaperMarkersToArtifacts(
     sourceFileName: string,
     settings: ConversionSettings,
 ): ConversionArtifacts {
-    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], sourceFileName, settings);
+    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], sourceFileName, settings, []);
 }
 
 export function convertReaperCsvToArtifacts(dataString: string, sourceFileName: string, settings: ConversionSettings): ConversionArtifacts {
-    const rows = parseReaperMarkerRows(dataString);
+    const { headers, rows } = parseReaperMarkerCsv(dataString);
+    const validationWarnings = validateReaperCsvRows(headers, rows);
     const regionRows = settings.importMode === "regions-and-markers" ? rows.filter(isRegionRow) : [];
     const markerRows = rows.filter((row) => !isRegionRow(row));
     const normalizedMarkers = normalizeMarkerRows(markerRows);
 
-    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings);
+    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings, validationWarnings);
 }
 
 export function createConversionOutputFiles(artifacts: ConversionArtifacts) {
@@ -45,15 +47,16 @@ function convertMarkersAndRegionsToArtifacts(
     regionRows: ReaperRegionRow[],
     sourceFileName: string,
     settings: ConversionSettings,
+    validationWarnings: string[],
 ): ConversionArtifacts {
     const appearanceRegistry = createAppearanceRegistry(settings.appearanceStartNumber);
     const outputBaseName = normalizeOutputBaseName(sourceFileName);
 
     if (settings.importMode === "regions-and-markers" && regionRows.length > 0) {
-        return convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry);
+        return convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry, validationWarnings);
     }
 
-    return convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry);
+    return convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry, validationWarnings);
 }
 
 function convertMarkersOnlyArtifacts(
@@ -61,6 +64,7 @@ function convertMarkersOnlyArtifacts(
     outputBaseName: string,
     settings: ConversionSettings,
     appearanceRegistry: ReturnType<typeof createAppearanceRegistry>,
+    validationWarnings: string[],
 ): ConversionArtifacts {
     const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(normalizedMarkers);
     const repeatedSequences = groupRepeatedSequences(
@@ -85,6 +89,7 @@ function convertMarkersOnlyArtifacts(
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
+        validationWarnings,
         regionSequences: prefixed.regionSequences,
         uniqueCues,
         repeatedSequences: prefixed.repeatedSequences,
@@ -100,6 +105,7 @@ function convertHybridArtifacts(
     outputBaseName: string,
     settings: ConversionSettings,
     appearanceRegistry: ReturnType<typeof createAppearanceRegistry>,
+    validationWarnings: string[],
 ): ConversionArtifacts {
     const regions = parseRegions(regionRows);
     const markersWithRegions = assignMarkersToRegions(normalizedMarkers, regions);
@@ -151,6 +157,7 @@ function convertHybridArtifacts(
     return {
         importMode: settings.importMode ?? "regions-and-markers",
         outputBaseName,
+        validationWarnings,
         regionSequences: prefixed.regionSequences,
         uniqueCues,
         repeatedSequences: prefixed.repeatedSequences,

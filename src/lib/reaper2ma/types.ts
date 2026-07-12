@@ -65,6 +65,7 @@ export type ConvertedMarker = {
     regionActions?: RegionActionTag[];
     start: string;
     color: string;
+    regionTargetId?: string;
     regionId?: string;
     regionLabel?: string;
     bpm?: number;
@@ -149,6 +150,7 @@ export type ConversionSettings = {
     timecodeNumber: number;
     pageNumber: number;
     pageSlotStart: number;
+    bumpPageSlotStart: number;
     cueStartNumber: number;
     speedMaster: string;
     prefix: string;
@@ -199,6 +201,7 @@ export type ExampleMacroPresetOutputFile = {
 export type ConversionArtifacts = {
     importMode: ImportMode;
     outputBaseName: string;
+    validationWarnings: string[];
     regionSequences: RegionSequence[];
     uniqueCues: ConvertedMarker[];
     repeatedSequences: RepeatedSequence[];

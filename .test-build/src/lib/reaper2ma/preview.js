@@ -9,7 +9,7 @@ export function createConversionPreview(artifacts, sourceMarkerCount) {
         ...(artifacts.bpmSequence ? [artifacts.bpmSequence.displayName] : []),
     ];
     const appearanceCount = collectAppearanceNumbers(artifacts).size;
-    const warnings = [];
+    const warnings = [...(artifacts.validationWarnings ?? [])];
     if (artifacts.uniqueCues.length === 0) {
         warnings.push("La séquence principale est vide: aucun cue ne sera créé dans la séquence de base.");
     }

@@ -20,16 +20,31 @@ function parseReaperColorValue(color) {
     }
     return Number.parseInt(trimmedColor, 10);
 }
-export function convertReaperColorToGrandmaAppearanceColor(color) {
+function convertReaperColorToRgb(color) {
     const parsedColor = parseReaperColorValue(color);
     if (parsedColor === undefined || !Number.isFinite(parsedColor)) {
         return undefined;
     }
     const rgb = parsedColor & REAPER_COLOR_MASK;
-    const red = (rgb >> 16) & 0xff;
-    const green = (rgb >> 8) & 0xff;
-    const blue = rgb & 0xff;
-    return `COLOR="${GRANDMA_APPEARANCE_COLOR}" BackR=${red} BackG=${green} BackB=${blue} BackAlpha=${GRANDMA_APPEARANCE_BACK_ALPHA}`;
+    return {
+        red: (rgb >> 16) & 0xff,
+        green: (rgb >> 8) & 0xff,
+        blue: rgb & 0xff,
+    };
+}
+export function convertReaperColorToGrandmaAppearanceColor(color) {
+    const rgb = convertReaperColorToRgb(color);
+    if (!rgb) {
+        return undefined;
+    }
+    return `COLOR="${GRANDMA_APPEARANCE_COLOR}" BackR=${rgb.red} BackG=${rgb.green} BackB=${rgb.blue} BackAlpha=${GRANDMA_APPEARANCE_BACK_ALPHA}`;
+}
+export function convertReaperColorToCssColor(color) {
+    const rgb = convertReaperColorToRgb(color);
+    if (!rgb) {
+        return undefined;
+    }
+    return `rgb(${rgb.red}, ${rgb.green}, ${rgb.blue})`;
 }
 export function createAppearanceNameFromReaperColor(color) {
     return `R2MA Color ${color.trim()}`;

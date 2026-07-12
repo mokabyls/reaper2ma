@@ -12,7 +12,7 @@ export function collectTimecodeTimestamps(
         ...regionSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
         ...repeatedSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
         ...bumpSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
-        ...(bpmSequence?.events.map((event) => event.timestamp) ?? []),
+        ...(bpmSequence?.events.flatMap((event) => [event.timestamp, offsetTimestampByMilliseconds(event.timestamp, 500)]) ?? []),
     ].filter((timestamp) => timestamp !== "");
 }
 
@@ -27,4 +27,14 @@ export function calculateTimecodeDuration(timestamps: string[]): string {
     }, 0);
 
     return (maxTimestamp + 1).toFixed(3);
+}
+
+function offsetTimestampByMilliseconds(timestamp: string, milliseconds: number): string {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+
+    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
 }

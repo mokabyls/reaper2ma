@@ -30,11 +30,17 @@ type ParsedMarkerName = {
     tags: MarkerTag[];
     isGlobal?: boolean;
     bumpAction?: BumpActionTag;
+    regionTargetId?: string;
     regionActions?: RegionActionTag[];
     cueTiming?: NonNullable<ConvertedMarker["cueTiming"]>;
     bpm?: number;
     bpmText?: string;
     cueFade?: string;
+};
+
+export type ParsedReaperMarkerCsv = {
+    headers: string[];
+    rows: ReaperMarkerRow[];
 };
 
 export function sanitizeMarkerName(name: string): string {
@@ -47,7 +53,8 @@ export function parseMarkerName(name: string): ParsedMarkerName {
     const { displayName: rawDisplayName, execToken: suffixExecToken } = parseExecutionSuffix(remainder);
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
     const regionActions = extractRegionActions(tags);
-    const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag)));
+    const regionTargetId = extractRegionTargetId(tags);
+    const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag) && !isRegionTargetTag(tag)));
     const isGlobal = tags.some(isGlobalScopeTag);
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
     const bumpAction = parseBumpAction(execToken, tags);
@@ -58,6 +65,7 @@ export function parseMarkerName(name: string): ParsedMarkerName {
         tags,
         ...(isGlobal ? { isGlobal } : {}),
         ...(bumpAction ? { bumpAction } : {}),
+        ...(regionTargetId ? { regionTargetId } : {}),
         ...(regionActions.length > 0
             ? {
                   regionActions,
@@ -94,11 +102,11 @@ export function parseMarkerExecution(name: string): {
     };
 }
 
-export function parseReaperMarkerRows(dataString: string): ReaperMarkerRow[] {
+export function parseReaperMarkerCsv(dataString: string): ParsedReaperMarkerCsv {
     const parsedLines = csv.parse(dataString) as string[][];
     const header = parsedLines[0] ?? [];
 
-    return parsedLines.slice(1).map((row) => {
+    const rows = parsedLines.slice(1).map((row) => {
         const obj: Record<string, string> = {};
 
         row.forEach((value, index) => {
@@ -117,12 +125,21 @@ export function parseReaperMarkerRows(dataString: string): ReaperMarkerRow[] {
             Color: obj.Color ?? "",
         };
     });
+
+    return {
+        headers: header,
+        rows,
+    };
+}
+
+export function parseReaperMarkerRows(dataString: string): ReaperMarkerRow[] {
+    return parseReaperMarkerCsv(dataString).rows;
 }
 
 export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] {
     return rows.map((row) => {
         const marker = parseMarkerName(row.Name);
-        const markerTags = marker.tags.filter((tag) => !isRegionActionTag(tag));
+        const markerTags = marker.tags.filter((tag) => !isRegionActionTag(tag) && !isRegionTargetTag(tag));
 
         return {
             displayName: marker.displayName,
@@ -130,6 +147,7 @@ export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] 
             tags: markerTags,
             ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
             ...(marker.bumpAction ? { bumpAction: marker.bumpAction } : {}),
+            ...(marker.regionTargetId ? { regionTargetId: marker.regionTargetId } : {}),
             ...(marker.regionActions && marker.regionActions.length > 0
                 ? {
                       regionActions: marker.regionActions,
@@ -315,6 +333,14 @@ function isRegionActionTag(tag: MarkerTag): boolean {
     return key === "ON" || key === "OFF";
 }
 
+function isRegionTargetTag(tag: MarkerTag): boolean {
+    if (tag.value !== null) {
+        return false;
+    }
+
+    return /^R\d+$/.test(tag.key.trim().toUpperCase());
+}
+
 function isGlobalScopeTag(tag: MarkerTag): boolean {
     if (tag.value !== null) {
         return false;
@@ -377,4 +403,8 @@ function extractRegionActions(tags: MarkerTag[]): RegionActionTag[] {
             },
         ];
     });
+}
+
+function extractRegionTargetId(tags: MarkerTag[]): string | undefined {
+    return tags.find(isRegionTargetTag)?.key.trim().toUpperCase();
 }

@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { XMLParser } from "fast-xml-parser";
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
-import { convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
+import { convertReaperColorToCssColor, convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
 import { createExportBundleFiles } from "../src/lib/reaper2ma/export-bundle.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
 import { createConversionPreview } from "../src/lib/reaper2ma/preview.js";
+import { resolveSpeedMaster } from "../src/lib/reaper2ma/settings.js";
+import { createTimelinePreview } from "../src/lib/reaper2ma/timeline-preview.js";
 import { createReaperTransportMacroOutputFile, generateReaperTransportMacros } from "../src/lib/reaper2ma/transport-macros.js";
 import { bpmTagProvider } from "../src/lib/reaper2ma/providers/bpm.js";
 import { cueFadeTagProvider } from "../src/lib/reaper2ma/providers/cue-fade.js";
@@ -25,6 +27,7 @@ const baseSettings = {
     timecodeNumber: 1,
     pageNumber: 1,
     pageSlotStart: 201,
+    bumpPageSlotStart: 101,
     cueStartNumber: 1,
     speedMaster: "3.4",
     prefix: "1",
@@ -239,6 +242,12 @@ describe("marker normalization", () => {
             tags: [{ key: "GLOBAL", value: null }],
             isGlobal: true,
         });
+        assert.deepEqual(parseMarkerName("[R2] Prep Chorus"), {
+            displayName: "Prep Chorus",
+            execToken: "Go+",
+            tags: [{ key: "R2", value: null }],
+            regionTargetId: "R2",
+        });
     });
     it("ignores invalid BPM metadata and keeps exporting", () => {
         const markers = normalizeMarkerRows([
@@ -377,6 +386,8 @@ describe("marker normalization", () => {
         assert.equal(convertReaperColorToGrandmaAppearanceColor("F2FF00"), 'COLOR="1,1,1,0" BackR=242 BackG=255 BackB=0 BackAlpha=221');
         assert.equal(convertReaperColorToGrandmaAppearanceColor("#00BFFF"), 'COLOR="1,1,1,0" BackR=0 BackG=191 BackB=255 BackAlpha=221');
         assert.equal(convertReaperColorToGrandmaAppearanceColor(""), undefined);
+        assert.equal(convertReaperColorToCssColor("#00BFFF"), "rgb(0, 191, 255)");
+        assert.equal(convertReaperColorToCssColor("not-a-color"), undefined);
     });
 });
 describe("conversion artifacts", () => {
@@ -459,6 +470,104 @@ describe("conversion artifacts", () => {
         assert.deepEqual(preview.generatedSequenceNames, ["MA 1 - SD", "MA 1 - Crash"]);
         assert.equal(preview.warnings.length, 0);
     });
+    it("warns when the CSV looks exported with musical time instead of seconds", () => {
+        const csv = `#,Name,Start,End,Length,Lane
+R1,Region A,1.1.00000000,4.1.00000000,3.0.000000,0
+M1,Cue A,1.2.00000000,,,1
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "musical-time.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const preview = createConversionPreview(artifacts, 2);
+        assert.equal(artifacts.validationWarnings.some((warning) => warning.includes('colonne "Color"')), true);
+        assert.equal(preview.warnings.some((warning) => warning.includes("mesures/temps") && warning.includes("secondes")), true);
+    });
+    it("builds timeline preview tracks in generated timecode order", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,5,5,#00BFFF
+1,Region Cue,1,,,
+2,Main Cue,6,,,
+3,Hit,7,,,19005190
+4,[Temp|Release_250] Bump,8,,,19005190
+5,[BPM_120] Tempo,9,,,
+`;
+        const settings = {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        };
+        const artifacts = convertReaperCsvToArtifacts(csv, "timeline.csv", settings);
+        const timeline = createTimelinePreview(artifacts, settings);
+        assert.equal(timeline.enabled, true);
+        assert.deepEqual(timeline.tracks.map((track) => track.kind), ["main", "region", "repeated", "bump", "bpm"]);
+        assert.deepEqual(timeline.tracks.map((track) => track.sequenceNumber), [9001, 9002, 9003, 9004, 9005]);
+        assert.equal(timeline.tracks[1].color, "rgb(0, 191, 255)");
+        assert.equal(timeline.duration, "10.500");
+        assert.equal(timeline.eventCount, 10);
+        assert.deepEqual(timeline.tracks[4].events.map((event) => ({
+            timestamp: event.timestamp,
+            token: event.token,
+            label: event.label,
+            isDerived: event.isDerived,
+        })), [
+            { timestamp: "9", token: "Temp", label: "BPM 120", isDerived: false },
+            { timestamp: "9.500", token: "TempRelease", label: "BPM 120 release", isDerived: true },
+        ]);
+    });
+    it("routes compact region action tags into the target timeline tracks", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region One,0,5,5,
+R2,Region Two,5,10,5,
+1,[OFF_R1|ON_R2] Cue,1,,,
+`;
+        const settings = {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        };
+        const artifacts = convertReaperCsvToArtifacts(csv, "timeline-actions.csv", settings);
+        const timeline = createTimelinePreview(artifacts, settings);
+        const regionOneTrack = timeline.tracks.find((track) => track.displayName === "MA R1 - Region One");
+        const regionTwoTrack = timeline.tracks.find((track) => track.displayName === "MA R2 - Region Two");
+        assert.ok(regionOneTrack);
+        assert.ok(regionTwoTrack);
+        assert.deepEqual(regionOneTrack.events.map((event) => ({
+            timestamp: event.timestamp,
+            token: event.token,
+            label: event.label,
+            isDerived: event.isDerived,
+        })), [
+            { timestamp: "0", token: "Go+", label: "Region Start", isDerived: false },
+            { timestamp: "1", token: "Off", label: "OFF R1", isDerived: true },
+            { timestamp: "1", token: "Go+", label: "Cue", isDerived: false },
+            { timestamp: "4.900", token: "Go+", label: "Region End", isDerived: false },
+        ]);
+        assert.deepEqual(regionTwoTrack.events
+            .filter((event) => event.isDerived)
+            .map((event) => ({
+            timestamp: event.timestamp,
+            token: event.token,
+            label: event.label,
+            cueNumber: event.cueNumber,
+            isDerived: event.isDerived,
+        })), [{ timestamp: "1", token: "Go+", label: "ON R2", cueNumber: 1, isDerived: true }]);
+    });
+    it("handles cues-only and non-numeric timestamps in timeline preview", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,not-a-time,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "bad-time.csv", baseSettings);
+        const cuesOnlyTimeline = createTimelinePreview(artifacts, {
+            ...baseSettings,
+            exportMode: "cues-only",
+        });
+        const timeline = createTimelinePreview(artifacts, baseSettings);
+        assert.equal(cuesOnlyTimeline.enabled, false);
+        assert.equal(cuesOnlyTimeline.emptyMessage, "Cues only mode does not create grandMA3 timecode tracks.");
+        assert.equal(timeline.enabled, true);
+        assert.equal(timeline.duration, "1.000");
+        assert.equal(timeline.tracks[0].events[0].timeLabel, "not-a-time");
+        assert.equal(timeline.tracks[0].events[0].positionPercent, 0);
+    });
     it("builds hybrid region artifacts from the demo CSV fixture", () => {
         const artifacts = convertReaperCsvToArtifacts(regionFixtureCsv, "test-billy-markers-without-mp3_regions_markers.csv", {
             ...baseSettings,
@@ -473,12 +582,12 @@ describe("conversion artifacts", () => {
             sequenceNumber: sequence.sequenceNumber,
             cues: sequence.cues.map((cue) => cue.name),
         })), [
-            { regionId: "R1", displayName: "MA R1 - Introduction", sequenceNumber: 9002, cues: ["Introduction"] },
+            { regionId: "R1", displayName: "MA R1 - Introduction", sequenceNumber: 9002, cues: ["Region Start + Introduction", "Region End"] },
             {
                 regionId: "R2",
                 displayName: "MA R2 - Introduction - Sub Region",
                 sequenceNumber: 9003,
-                cues: ["Début Billy", "Billy A Cet Age", "Intro Musique", "Montée", "Fin montée"],
+                cues: ["Region Start", "Début Billy", "Billy A Cet Age", "Intro Musique", "Montée", "Fin montée", "Region End"],
             },
         ]);
         assert.equal(artifacts.repeatedSequences.length, 1);
@@ -499,9 +608,11 @@ describe("conversion artifacts", () => {
         assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 2 Cue 4 APPEARANCE="R2MA Color F2FF00"`), true);
         assert.equal(commands.includes('Set Appearance 9002 COLOR="1,1,1,0" BackR=242 BackG=255 BackB=0 BackAlpha=221'), true);
         assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 3 APPEARANCE="R2MA Color 00BFFF"`), true);
-        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 1 "Début Billy"`), true);
-        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 4 "Montée"`), true);
-        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 5 "Fin montée"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 1 "Region Start"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 2 "Début Billy"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 5 "Montée"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 6 "Fin montée"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 7 "Region End"`), true);
         assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Timecode 1`), true);
         assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1`), true);
         assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 4 Cue 1 At Timecode 1.1.4.1.1.1`), true);
@@ -523,9 +634,123 @@ R1,Region A,0,10,10,
         assert.equal(artifacts.uniqueCues.length, 1);
         assert.equal(artifacts.uniqueCues[0].displayName, "Global Cue");
         assert.equal(artifacts.regionSequences.length, 1);
-        assert.deepEqual(artifacts.regionSequences[0].cues.map((cue) => cue.name), ["Region Cue"]);
+        assert.deepEqual(artifacts.regionSequences[0].cues.map((cue) => cue.name), ["Region Start", "Region Cue", "Region End"]);
         assert.equal(commands.includes('Label DataPool "R2MA globalregion" Sequence 1 Cue 1 "Global Cue"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA globalregion" Sequence 1 Cue 1 "Region Cue"'), false);
+    });
+    it("routes explicitly tagged markers into a region sequence before the region starts", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Verse,0,5,5,
+R2,Chorus,10,20,10,
+1,Verse Cue,1,,,
+2,Outside Main,6,,,
+3,[R2] Prep Chorus,8,,,
+4,Chorus Start,10,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "explicit-region.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.deepEqual(artifacts.uniqueCues.map((cue) => cue.displayName), ["Outside Main"]);
+        assert.deepEqual(artifacts.regionSequences.map((sequence) => ({
+            regionId: sequence.regionId,
+            cues: sequence.cues.map((cue) => cue.name),
+            events: sequence.events.map((event) => event.timestamp),
+        })), [
+            {
+                regionId: "R1",
+                cues: ["Region Start", "Verse Cue", "Region End"],
+                events: ["0", "1", "4.900"],
+            },
+            {
+                regionId: "R2",
+                cues: ["Prep Chorus", "Region Start + Chorus Start", "Region End"],
+                events: ["8", "10", "19.900"],
+            },
+        ]);
+        assert.equal(commands.includes('Label DataPool "R2MA explicitregion" Sequence 3 Cue 1 "Prep Chorus"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA explicitregion" Sequence 3 Cue 2 "Region Start + Chorus Start"'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA explicitregion" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
+    });
+    it("merges region boundary cue names with markers at the same timestamp", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,10,10,
+1,Intro Cue,0,,,
+2,[R1] Outro Cue,10,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "boundary-merge.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.deepEqual(artifacts.regionSequences[0].cues.map((cue) => ({
+            cueNumber: cue.cueNumber,
+            name: cue.name,
+        })), [
+            { cueNumber: 1, name: "Region Start + Intro Cue" },
+            { cueNumber: 2, name: "Region End + Outro Cue" },
+        ]);
+        assert.deepEqual(artifacts.regionSequences[0].events.map((event) => ({
+            timestamp: event.timestamp,
+            cueName: event.cueName,
+        })), [
+            { timestamp: "0", cueName: "Region Start + Intro Cue" },
+            { timestamp: "9.900", cueName: "Region End + Outro Cue" },
+        ]);
+        assert.equal(commands.includes('Label DataPool "R2MA boundarymerge" Sequence 1 Cue 1 "Region Start + Intro Cue"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA boundarymerge" Sequence 1 Cue 2 "Region End + Outro Cue"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA boundarymerge" Sequence 1 Cue 3'), false);
+    });
+    it("merges the shifted region end cue with markers near the region end", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,10,10,
+1,Last Marker,9.950,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "near-region-end.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.deepEqual(artifacts.regionSequences[0].events.map((event) => ({
+            timestamp: event.timestamp,
+            cueName: event.cueName,
+        })), [
+            { timestamp: "0", cueName: "Region Start" },
+            { timestamp: "9.950", cueName: "Region End + Last Marker" },
+        ]);
+        assert.equal(commands.includes('Label DataPool "R2MA nearregionend" Sequence 1 Cue 2 "Region End + Last Marker"'), true);
+        assert.equal(commands.includes('Set 2 "TIME" "9.950"'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA nearregionend" Sequence 1 Cue 2 At Timecode 1.1.1.1.1.2'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA nearregionend" Sequence 1 Cue 3'), false);
+    });
+    it("adds automatic start and end cues to empty region sequences", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Empty Region,4,12,8,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "empty-region.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(artifacts.regionSequences.length, 1);
+        assert.deepEqual(artifacts.regionSequences[0].cues.map((cue) => ({
+            cueNumber: cue.cueNumber,
+            name: cue.name,
+        })), [
+            { cueNumber: 1, name: "Region Start" },
+            { cueNumber: 2, name: "Region End" },
+        ]);
+        assert.deepEqual(artifacts.regionSequences[0].events.map((event) => ({
+            timestamp: event.timestamp,
+            cueName: event.cueName,
+        })), [
+            { timestamp: "4", cueName: "Region Start" },
+            { timestamp: "11.900", cueName: "Region End" },
+        ]);
+        assert.equal(commands.includes('Label DataPool "R2MA emptyregion" Sequence 1 Cue 1 "Region Start"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA emptyregion" Sequence 1 Cue 2 "Region End"'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA emptyregion" Sequence 1 Cue 2 At Timecode 1.1.1.1.1.2'), true);
     });
     it("calculates timecode duration from the latest generated event", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -542,10 +767,10 @@ R1,Region A,10,20,10,
         });
         const preview = createConversionPreview(artifacts, 5);
         const commands = getMacroCommands(artifacts.macroXml);
-        assert.equal(commands.includes('set 1 DURATION="26.000"'), true);
-        assert.equal(preview.duration, "26.000");
+        assert.equal(commands.includes('set 1 DURATION="26.500"'), true);
+        assert.equal(preview.duration, "26.500");
     });
-    it("falls back to Cue 1 for an unlabeled marker inside a region", () => {
+    it("falls back to the cue number for an unlabeled marker inside a region", () => {
         const csv = `#,Name,Start,End,Length,Color
 R1,Region A,0,10,10,
 1,,1,,,
@@ -555,8 +780,8 @@ R1,Region A,0,10,10,
             importMode: "regions-and-markers",
         });
         assert.equal(artifacts.regionSequences.length, 1);
-        assert.equal(artifacts.regionSequences[0].cues[0].name, "Cue 1");
-        assert.equal(getMacroCommands(artifacts.macroXml).includes('Label DataPool "R2MA blankcue" Sequence 1 Cue 1 "Cue 1"'), true);
+        assert.deepEqual(artifacts.regionSequences[0].cues.map((cue) => cue.name), ["Region Start", "Cue 2", "Region End"]);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Label DataPool "R2MA blankcue" Sequence 1 Cue 2 "Cue 2"'), true);
     });
     it("assigns sequence and cue appearances independently in hybrid mode", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -569,10 +794,10 @@ R1,Region A,0,10,10,123456
             importMode: "regions-and-markers",
         });
         assert.equal(artifacts.regionSequences[0].appearanceName, "R2MA Color 123456");
-        assert.equal(artifacts.regionSequences[0].cues[1].appearanceName, "R2MA Color 654321");
-        assert.equal(artifacts.regionSequences[0].cues[1].appearanceColor, 'COLOR="1,1,1,0" BackR=9 BackG=251 BackB=241 BackAlpha=221');
+        assert.equal(artifacts.regionSequences[0].cues[2].appearanceName, "R2MA Color 654321");
+        assert.equal(artifacts.regionSequences[0].cues[2].appearanceColor, 'COLOR="1,1,1,0" BackR=9 BackG=251 BackB=241 BackAlpha=221');
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 APPEARANCE="R2MA Color 123456"'), true);
-        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 Cue 2 APPEARANCE="R2MA Color 654321"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 Cue 3 APPEARANCE="R2MA Color 654321"'), true);
     });
     it("emits OFF before ON for compact region action tags", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -585,8 +810,8 @@ R2,Region Two,5,10,5,
             importMode: "regions-and-markers",
         });
         const commands = getMacroCommands(artifacts.macroXml);
-        const offTokenIndex = commands.indexOf('Set 1 "TOKEN" "Off"');
-        const onTokenIndex = commands.indexOf('Set 1 "TOKEN" "Go+"');
+        const offTokenIndex = commands.indexOf('Set 2 "TOKEN" "Off"');
+        const onTokenIndex = commands.indexOf('Set 1 "TOKEN" "Go+"', offTokenIndex + 1);
         assert.notEqual(offTokenIndex, -1);
         assert.notEqual(onTokenIndex, -1);
         assert.ok(offTokenIndex < onTokenIndex);
@@ -655,6 +880,14 @@ R2,Region Two,5,10,5,
         assert.equal(normalizeOutputBaseName("Song 01.CSV"), "songcsv");
         assert.equal(buildOutputFileName("demo", "macro"), "demo_macro.xml");
     });
+    it("resolves the numeric UI Speed Master to the grandMA3 Master 3.X address", () => {
+        assert.equal(resolveSpeedMaster(1), "3.1");
+        assert.equal(resolveSpeedMaster(4), "3.4");
+        assert.equal(resolveSpeedMaster(15), "3.15");
+        assert.throws(() => resolveSpeedMaster(0), /1 to 15/);
+        assert.throws(() => resolveSpeedMaster(16), /1 to 15/);
+        assert.throws(() => resolveSpeedMaster(1.5), /1 to 15/);
+    });
     it("parses raw CSV rows with the expected headers", () => {
         const rows = parseReaperMarkerRows(fixtureCsv);
         const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(normalizeMarkerRows(rows));
@@ -721,11 +954,28 @@ R2,Region Two,5,10,5,
         assert.equal(commands.includes('Set DataPool "R2MA bpm" Sequence 3 Property "SpeedMaster" #[Master 3.4]'), true);
         assert.equal(commands.includes('Store DataPool "R2MA bpm" Sequence 3 "MA BPM"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA bpm" Sequence 3 "MA BPM"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA bpm" Sequence 3 Cue 1 "BPM 129.5"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA bpm" Sequence 3 Cue 2 "BPM 123.45"'), true);
         assert.equal(artifacts.macroXml.includes('Master 3.4 At BPM 129.5'), true);
         assert.equal(artifacts.macroXml.includes('Master 3.4 At BPM 123.45'), true);
         assert.equal(commands.includes('Set DataPool "R2MA bpm" Sequence 3 Cue 1 Property "Command" "Master 3.4 At BPM 129.5"'), true);
         assert.equal(commands.includes('Store DataPool "R2MA bpm" Timecode 1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bpm" Sequence 3 At Page 1.203'), false);
         assert.equal(commands.includes('Assign DataPool "R2MA bpm" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bpm" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.2'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bpm" Sequence 3 Cue 2 At Timecode 1.1.3.1.1.3'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bpm" Sequence 3 Cue 2 At Timecode 1.1.3.1.1.4'), true);
+        const bpmTrackStart = commands.indexOf('Assign DataPool "R2MA bpm" Sequence 3 At 3');
+        const bpmTrackEnd = commands.indexOf("cd root", bpmTrackStart + 1);
+        const bpmTrackCommands = commands.slice(bpmTrackStart, bpmTrackEnd);
+        assert.notEqual(bpmTrackStart, -1);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 2 "TIME" "0.500"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 2 "TOKEN" "TempRelease"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 3 "TOKEN" "Temp"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 4 "TIME" "2.500"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 4 "TOKEN" "TempRelease"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Go+"'), false);
     });
     it("applies cue fade commands to unique, repeated and bump cues", () => {
         const csv = `#,Name,Start,Color
@@ -794,7 +1044,29 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.bumpSequences[1].displayName, "MA 1 - Verse - BUMP - HIT");
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Store DataPool "R2MA bump" Sequence 3 "MA 1 - Intro - BUMP - HIT"'), true);
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Store DataPool "R2MA bump" Sequence 4 "MA 1 - Verse - BUMP - HIT"'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 1 At Page 1.201'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 2 At Page 1.202'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 3 At Page 1.101'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 4 At Page 1.102'), true);
+        assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 3 At Page 1.203'), false);
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Assign DataPool "R2MA bump" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
+    });
+    it("uses the configured bump page slot start for bump executor assignments", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,0,19005190
+2,[Temp] HIT,1,19005190
+3,Verse,2,33554431
+4,[Flash] SNAP,3,33554431
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "bump-custom.csv", {
+            ...baseSettings,
+            bumpPageSlotStart: 111,
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 1 At Page 1.201'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 2 At Page 1.202'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 3 At Page 1.111'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 4 At Page 1.112'), true);
     });
     it("emits bump release events from inline, paired and fallback release tags", () => {
         const inlineCsv = `#,Name,Start,Color

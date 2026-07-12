@@ -22,6 +22,7 @@ const settings = {
     timecodeNumber: parseIntegerOption(args.timecodeNumber, "timecode-number", 1),
     pageNumber: parseIntegerOption(args.pageNumber, "page-number", 1),
     pageSlotStart: parseIntegerOption(args.pageSlotStart, "page-slot-start", 201),
+    bumpPageSlotStart: parseIntegerOption(args.bumpPageSlotStart, "bump-page-slot-start", 101),
     cueStartNumber: parseIntegerOption(args.cueStartNumber, "cue-start-number", 1),
     speedMaster: args.speedMaster ?? "3.4",
     prefix: args.prefix ?? "1",
@@ -162,6 +163,7 @@ Options:
   --timecode-number <number>        Default: 1
   --page-number <number>            Default: 1
   --page-slot-start <number>        Default: 201
+  --bump-page-slot-start <number>   Default: 101
   --cue-start-number <number>       Default: 1
   --speed-master <value>            Default: 3.4
   --prefix <value>                  Default: 1

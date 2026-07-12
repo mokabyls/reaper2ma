@@ -1,0 +1,469 @@
+import { convertReaperColorToCssColor } from "./colors.js";
+import { createUniqueCuePlan } from "./cue-plan.js";
+import { applySequenceNamePrefix } from "./sequence-services.js";
+import type { ConversionArtifacts, ConversionSettings, RegionActionTag, SequenceTrigger } from "./types.js";
+
+export type TimelineTrackKind = "main" | "region" | "repeated" | "bump" | "bpm";
+
+export type TimelinePreviewEvent = {
+    id: string;
+    timestamp: string;
+    timeLabel: string;
+    positionPercent: number;
+    laneLevel: number;
+    label: string;
+    token: string;
+    cueNumber?: number;
+    cueName?: string;
+    isDerived: boolean;
+};
+
+export type TimelinePreviewTrack = {
+    id: string;
+    trackIndex: number;
+    kind: TimelineTrackKind;
+    kindLabel: string;
+    sequenceNumber: number;
+    displayName: string;
+    color: string;
+    laneCount: number;
+    events: TimelinePreviewEvent[];
+};
+
+export type TimelinePreviewTick = {
+    id: string;
+    timeValue: number;
+    label: string;
+    positionPercent: number;
+    isMajor: boolean;
+};
+
+export type TimelinePreview = {
+    enabled: boolean;
+    duration: string;
+    durationSeconds: number;
+    tracks: TimelinePreviewTrack[];
+    ticks: TimelinePreviewTick[];
+    eventCount: number;
+    emptyMessage?: string;
+};
+
+type InternalTimelineEvent = TimelinePreviewEvent & {
+    priority: number;
+    sourceOrder: number;
+    regionActions?: RegionActionTag[];
+};
+
+type InternalTimelineTrack = Omit<TimelinePreviewTrack, "events"> & {
+    events: InternalTimelineEvent[];
+    regionId?: string;
+};
+
+const BPM_RELEASE_DELAY_MS = 500;
+const FALLBACK_DURATION_SECONDS = 1;
+
+const FALLBACK_TRACK_COLORS: Record<TimelineTrackKind, string> = {
+    main: "#00d45a",
+    region: "#20c7d8",
+    repeated: "#f5d000",
+    bump: "#f59e0b",
+    bpm: "#b78cff",
+};
+
+const KIND_LABELS: Record<TimelineTrackKind, string> = {
+    main: "Main",
+    region: "Region",
+    repeated: "Repeat",
+    bump: "Bump",
+    bpm: "BPM",
+};
+
+export function createTimelinePreview(artifacts: ConversionArtifacts, settings: ConversionSettings): TimelinePreview {
+    if (settings.exportMode === "cues-only") {
+        return createEmptyTimelinePreview("Cues only mode does not create grandMA3 timecode tracks.");
+    }
+
+    const tracks = createTimelineTracks(artifacts, settings);
+    const timestamps = tracks.flatMap((track) => track.events.map((event) => event.timestamp));
+    const durationSeconds = calculatePreviewDurationSeconds(timestamps);
+    const ticks = createTimelineTicks(durationSeconds);
+
+    for (const track of tracks) {
+        track.events.sort(compareTimelineEvents);
+
+        track.events = track.events.map((event, index) => ({
+            ...event,
+            id: `${track.id}-event-${index + 1}`,
+            positionPercent: calculateTimelinePosition(event.timestamp, durationSeconds),
+        }));
+        track.events = assignTimelineEventLanes(track.events);
+        track.laneCount = Math.max(1, ...track.events.map((event) => event.laneLevel + 1));
+    }
+
+    return {
+        enabled: true,
+        duration: durationSeconds.toFixed(3),
+        durationSeconds,
+        tracks: tracks.map(({ regionId, ...track }) => ({
+            ...track,
+            events: track.events.map(({ priority, sourceOrder, regionActions, ...event }) => event),
+        })),
+        ticks,
+        eventCount: tracks.reduce((total, track) => total + track.events.length, 0),
+        ...(tracks.length === 0 ? { emptyMessage: "No timecode tracks will be generated from this CSV." } : {}),
+    };
+}
+
+function createTimelineTracks(artifacts: ConversionArtifacts, settings: ConversionSettings): InternalTimelineTrack[] {
+    const tracks: InternalTimelineTrack[] = [];
+    const regionTracksById = new Map<string, InternalTimelineTrack>();
+    let sourceOrder = 0;
+
+    const addTrack = (track: Omit<InternalTimelineTrack, "id" | "trackIndex" | "kindLabel" | "laneCount" | "events">): InternalTimelineTrack => {
+        const trackIndex = tracks.length + 1;
+        const createdTrack: InternalTimelineTrack = {
+            id: `${track.kind}-${track.sequenceNumber}-${trackIndex}`,
+            trackIndex,
+            kindLabel: KIND_LABELS[track.kind],
+            events: [],
+            laneCount: 1,
+            ...track,
+        };
+
+        tracks.push(createdTrack);
+
+        if (createdTrack.regionId) {
+            regionTracksById.set(createdTrack.regionId, createdTrack);
+        }
+
+        return createdTrack;
+    };
+
+    if (artifacts.uniqueCues.length > 0) {
+        const track = addTrack({
+            kind: "main",
+            sequenceNumber: settings.sequenceNumber,
+            displayName: applySequenceNamePrefix(`Sequence ${settings.sequenceNumber}`, settings.sequenceNamePrefix),
+            color: FALLBACK_TRACK_COLORS.main,
+        });
+        const cuePlan = createUniqueCuePlan(artifacts.uniqueCues);
+
+        cuePlan.forEach((cue, index) => {
+            addSequenceTriggerEvent(
+                track,
+                {
+                    timestamp: cue.start,
+                    execToken: cue.execToken,
+                    cueNumber: settings.cueStartNumber + index,
+                    cueName: cue.cueName,
+                    ...(cue.regionActions?.length ? { regionActions: cue.regionActions } : {}),
+                },
+                false,
+                1,
+                sourceOrder++,
+            );
+        });
+    }
+
+    for (const sequence of artifacts.regionSequences) {
+        const track = addTrack({
+            kind: "region",
+            sequenceNumber: sequence.sequenceNumber,
+            displayName: sequence.displayName,
+            color: resolveTrackColor("region", sequence.color),
+            regionId: sequence.regionId,
+        });
+
+        for (const event of sequence.events) {
+            addSequenceTriggerEvent(track, event, false, 1, sourceOrder++);
+        }
+    }
+
+    for (const sequence of artifacts.repeatedSequences) {
+        const track = addTrack({
+            kind: "repeated",
+            sequenceNumber: sequence.sequenceNumber,
+            displayName: sequence.displayName,
+            color: resolveTrackColor("repeated", sequence.color),
+        });
+
+        for (const event of sequence.events) {
+            addSequenceTriggerEvent(track, event, false, 1, sourceOrder++);
+        }
+    }
+
+    for (const sequence of artifacts.bumpSequences) {
+        const track = addTrack({
+            kind: "bump",
+            sequenceNumber: sequence.sequenceNumber,
+            displayName: sequence.displayName,
+            color: resolveTrackColor("bump", sequence.color),
+        });
+
+        for (const event of sequence.events) {
+            addSequenceTriggerEvent(track, event, false, 1, sourceOrder++);
+        }
+    }
+
+    if (artifacts.bpmSequence) {
+        const track = addTrack({
+            kind: "bpm",
+            sequenceNumber: artifacts.bpmSequence.sequenceNumber,
+            displayName: artifacts.bpmSequence.displayName,
+            color: FALLBACK_TRACK_COLORS.bpm,
+        });
+
+        artifacts.bpmSequence.events.forEach((event, index) => {
+            const cueNumber = index + 1;
+            const cueName = `BPM ${event.bpmText}`;
+
+            addTimelineEvent(track, {
+                timestamp: event.timestamp,
+                token: "Temp",
+                cueNumber,
+                cueName,
+                label: cueName,
+                isDerived: false,
+                priority: 1,
+                sourceOrder: sourceOrder++,
+            });
+            addTimelineEvent(track, {
+                timestamp: offsetTimestampByMilliseconds(event.timestamp, BPM_RELEASE_DELAY_MS),
+                token: "TempRelease",
+                cueNumber,
+                cueName,
+                label: `${cueName} release`,
+                isDerived: true,
+                priority: 1,
+                sourceOrder: sourceOrder++,
+            });
+        });
+    }
+
+    for (const track of tracks) {
+        for (const event of [...track.events]) {
+            for (const action of sortRegionActions(event.regionActions ?? [])) {
+                const targetTrack = regionTracksById.get(action.regionId);
+
+                if (!targetTrack) {
+                    continue;
+                }
+
+                const token = action.kind === "ON" ? "Go+" : "Off";
+
+                addTimelineEvent(targetTrack, {
+                    timestamp: event.timestamp,
+                    token,
+                    ...(action.kind === "ON" ? { cueNumber: 1, cueName: "Cue 1" } : {}),
+                    label: `${action.kind} ${action.regionId}`,
+                    isDerived: true,
+                    priority: action.kind === "OFF" ? 0 : 2,
+                    sourceOrder: sourceOrder++,
+                });
+            }
+        }
+    }
+
+    return tracks;
+}
+
+function addSequenceTriggerEvent(
+    track: InternalTimelineTrack,
+    event: SequenceTrigger,
+    isDerived: boolean,
+    priority: number,
+    sourceOrder: number,
+): void {
+    addTimelineEvent(track, {
+        timestamp: event.timestamp,
+        token: event.execToken,
+        cueNumber: event.cueNumber,
+        cueName: event.cueName,
+        label: event.cueName,
+        isDerived,
+        priority,
+        sourceOrder,
+        ...(event.regionActions?.length ? { regionActions: event.regionActions } : {}),
+    });
+}
+
+function addTimelineEvent(
+    track: InternalTimelineTrack,
+    event: {
+        timestamp: string;
+        token: string;
+        label: string;
+        isDerived: boolean;
+        priority: number;
+        sourceOrder: number;
+        cueNumber?: number;
+        cueName?: string;
+        regionActions?: RegionActionTag[];
+    },
+): void {
+    track.events.push({
+        id: "",
+        timestamp: event.timestamp,
+        timeLabel: formatTimelineTime(event.timestamp),
+        positionPercent: 0,
+        laneLevel: 0,
+        label: event.label,
+        token: event.token,
+        isDerived: event.isDerived,
+        priority: event.priority,
+        sourceOrder: event.sourceOrder,
+        ...(event.cueNumber !== undefined ? { cueNumber: event.cueNumber } : {}),
+        ...(event.cueName !== undefined ? { cueName: event.cueName } : {}),
+        ...(event.regionActions?.length ? { regionActions: event.regionActions } : {}),
+    });
+}
+
+function createEmptyTimelinePreview(emptyMessage: string): TimelinePreview {
+    return {
+        enabled: false,
+        duration: "0.000",
+        durationSeconds: 0,
+        tracks: [],
+        ticks: [],
+        eventCount: 0,
+        emptyMessage,
+    };
+}
+
+function resolveTrackColor(kind: TimelineTrackKind, color: string): string {
+    return convertReaperColorToCssColor(color) ?? FALLBACK_TRACK_COLORS[kind];
+}
+
+function calculatePreviewDurationSeconds(timestamps: string[]): number {
+    if (timestamps.length === 0) {
+        return 0;
+    }
+
+    const maxTimestamp = timestamps.reduce((max, timestamp) => {
+        const parsed = Number.parseFloat(timestamp);
+        return Number.isFinite(parsed) ? Math.max(max, parsed) : max;
+    }, 0);
+
+    return maxTimestamp + FALLBACK_DURATION_SECONDS;
+}
+
+function calculateTimelinePosition(timestamp: string, durationSeconds: number): number {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsedTimestamp) || durationSeconds <= 0) {
+        return 0;
+    }
+
+    return clamp((parsedTimestamp / durationSeconds) * 100, 0, 100);
+}
+
+function createTimelineTicks(durationSeconds: number): TimelinePreviewTick[] {
+    if (durationSeconds <= 0) {
+        return [];
+    }
+
+    const step = resolveTickStep(durationSeconds);
+    const ticks: TimelinePreviewTick[] = [];
+
+    for (let value = 0; value <= durationSeconds + step / 10; value += step) {
+        const tickValue = Math.min(value, durationSeconds);
+        const existingTick = ticks.find((tick) => Math.abs(tick.timeValue - tickValue) < 0.001);
+
+        if (!existingTick) {
+            ticks.push({
+                id: `tick-${ticks.length + 1}`,
+                timeValue: tickValue,
+                label: formatTimelineTime(tickValue.toFixed(3)),
+                positionPercent: calculateTimelinePosition(String(tickValue), durationSeconds),
+                isMajor: ticks.length === 0 || Math.abs(tickValue - durationSeconds) < 0.001,
+            });
+        }
+
+        if (tickValue === durationSeconds) {
+            break;
+        }
+    }
+
+    const lastTick = ticks[ticks.length - 1];
+
+    if (!lastTick || Math.abs(lastTick.timeValue - durationSeconds) > 0.001) {
+        ticks.push({
+            id: `tick-${ticks.length + 1}`,
+            timeValue: durationSeconds,
+            label: formatTimelineTime(durationSeconds.toFixed(3)),
+            positionPercent: 100,
+            isMajor: true,
+        });
+    }
+
+    return ticks;
+}
+
+function resolveTickStep(durationSeconds: number): number {
+    const rawStep = durationSeconds / 4;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const normalized = rawStep / magnitude;
+    const niceNormalized = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+
+    return niceNormalized * magnitude;
+}
+
+function formatTimelineTime(timestamp: string): string {
+    const parsed = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsed)) {
+        return timestamp;
+    }
+
+    return `${parsed.toFixed(2)}s`;
+}
+
+function offsetTimestampByMilliseconds(timestamp: string, milliseconds: number): string {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+
+    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
+}
+
+function sortRegionActions(actions: RegionActionTag[]): RegionActionTag[] {
+    return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));
+}
+
+function compareTimelineEvents(left: InternalTimelineEvent, right: InternalTimelineEvent): number {
+    const leftTime = Number.parseFloat(left.timestamp);
+    const rightTime = Number.parseFloat(right.timestamp);
+
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+
+    if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+    }
+
+    return left.sourceOrder - right.sourceOrder;
+}
+
+function assignTimelineEventLanes(events: InternalTimelineEvent[]): InternalTimelineEvent[] {
+    const laneLastPositions: number[] = [];
+    const minimumGapPercent = 9;
+
+    return events.map((event) => {
+        const laneIndex = laneLastPositions.findIndex((lastPosition) => event.positionPercent - lastPosition >= minimumGapPercent);
+        const resolvedLaneIndex = laneIndex === -1 ? laneLastPositions.length : laneIndex;
+
+        laneLastPositions[resolvedLaneIndex] = event.positionPercent;
+
+        return {
+            ...event,
+            laneLevel: resolvedLaneIndex,
+        };
+    });
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+    return Math.min(maximum, Math.max(minimum, value));
+}

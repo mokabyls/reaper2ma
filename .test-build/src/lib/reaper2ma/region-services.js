@@ -1,4 +1,9 @@
 import { sanitizeMarkerName } from "./marker-parser.js";
+const REGION_START_CUE_NAME = "Region Start";
+const REGION_END_CUE_NAME = "Region End";
+const REGION_END_CUE_LEAD_MS = 100;
+const REGION_END_CUE_MIN_GAP_MS = 1;
+const NUMERIC_TIMESTAMP_PATTERN = /^-?\d+(?:\.\d+)?$/;
 export function parseRegions(rows) {
     return rows
         .map((row, index) => {
@@ -28,7 +33,7 @@ export function assignMarkersToRegions(markers, regions) {
         if (marker.isGlobal || marker.bumpAction !== undefined) {
             return marker;
         }
-        const region = resolveContainingRegion(marker.start, regions);
+        const region = resolveTargetRegion(marker.regionTargetId, regions) ?? resolveContainingRegion(marker.start, regions);
         if (!region) {
             return marker;
         }
@@ -39,6 +44,12 @@ export function assignMarkersToRegions(markers, regions) {
         };
     });
 }
+function resolveTargetRegion(regionTargetId, regions) {
+    if (!regionTargetId) {
+        return undefined;
+    }
+    return regions.find((region) => region.regionId === regionTargetId);
+}
 export function buildRegionSequences(markers, regions, sequenceNumber, resolveAppearance) {
     const regionSequences = [];
     regions.forEach((region, index) => {
@@ -48,7 +59,7 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
             .sort((left, right) => compareMarkerStart(left.marker.start, right.marker.start, left.index, right.index))
             .map(({ marker }) => marker);
         const sequenceAppearance = region.color ? resolveAppearance(region.color) : undefined;
-        const cuePlan = createRegionCuePlan(regionMarkers, resolveAppearance);
+        const cuePlan = createRegionCuePlan(region, regionMarkers, resolveAppearance);
         const cues = cuePlan.map((cue) => ({
             cueNumber: cue.cueNumber,
             name: cue.name,
@@ -91,19 +102,6 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
                 }
                 : {}),
         }));
-        if (cues.length === 0) {
-            cues.push({
-                cueNumber: 1,
-                name: "Cue 1",
-            });
-            events.push({
-                timestamp: region.start,
-                execToken: "Go+",
-                cueNumber: 1,
-                cueName: "Cue 1",
-                regionActions: [],
-            });
-        }
         regionSequences.push({
             regionId: region.regionId,
             displayName: createRegionSequenceDisplayName(region),
@@ -132,23 +130,181 @@ function createRegionSequenceDisplayName(region) {
     const regionLabel = sanitizeMarkerName(region.regionLabel).trim();
     return regionLabel ? `${region.regionId} - ${regionLabel}` : region.regionId;
 }
-function createRegionCuePlan(markers, resolveAppearance) {
+function createRegionCuePlan(region, markers, resolveAppearance) {
     const seenNames = new Map();
-    return markers.map((marker, index) => {
+    const markerSources = markers.map((marker, index) => ({
+        kind: "marker",
+        marker,
+        timestamp: marker.start,
+        sortPriority: 1,
+        sourceOrder: index,
+    }));
+    const boundarySources = [
+        {
+            kind: "boundary",
+            timestamp: region.start,
+            eventTimestamp: region.start,
+            displayName: REGION_START_CUE_NAME,
+            sortPriority: 0,
+            sourceOrder: -1,
+        },
+        {
+            kind: "boundary",
+            timestamp: region.end,
+            eventTimestamp: createRegionEndCueTimestamp(region),
+            displayName: REGION_END_CUE_NAME,
+            sortPriority: 2,
+            sourceOrder: markers.length,
+        },
+    ];
+    const sources = mergeBoundarySourcesIntoMatchingMarkers(boundarySources, markerSources).sort(compareRegionCuePlanSources);
+    return sources.map((source, index) => {
         const cueNumber = index + 1;
-        const baseName = marker.displayName.trim().length > 0 ? sanitizeMarkerName(marker.displayName) : `Cue ${cueNumber}`;
+        const baseName = resolveRegionCueBaseName(source, cueNumber);
         const count = (seenNames.get(baseName) ?? 0) + 1;
         seenNames.set(baseName, count);
         const cueName = count === 1 ? baseName : `${baseName} ${count}`;
-        const appearanceReference = marker.color ? resolveAppearance(marker.color) : undefined;
+        if (source.kind === "boundary") {
+            return {
+                timestamp: source.eventTimestamp,
+                execToken: "Go+",
+                cueNumber,
+                name: cueName,
+            };
+        }
+        const appearanceReference = source.marker.color ? resolveAppearance(source.marker.color) : undefined;
         return {
-            ...marker,
-            timestamp: marker.start,
+            timestamp: source.boundaryEventTimestamp ?? source.marker.start,
+            execToken: source.marker.execToken,
             cueNumber,
             name: cueName,
-            appearanceReference,
+            ...(appearanceReference ? { appearanceReference } : {}),
+            ...(source.marker.regionActions?.length
+                ? {
+                    regionActions: source.marker.regionActions,
+                }
+                : {}),
+            ...(source.marker.cueFade !== undefined
+                ? {
+                    cueFade: source.marker.cueFade,
+                }
+                : {}),
+            ...(source.marker.cueTiming !== undefined
+                ? {
+                    cueTiming: source.marker.cueTiming,
+                }
+                : {}),
         };
     });
+}
+function resolveRegionCueBaseName(source, cueNumber) {
+    if (source.kind === "boundary") {
+        return source.displayName;
+    }
+    const sanitizedName = sanitizeMarkerName(source.marker.displayName).trim();
+    const markerName = sanitizedName || `Cue ${cueNumber}`;
+    if (source.boundaryLabels?.length) {
+        return [...source.boundaryLabels, markerName].join(" + ");
+    }
+    return markerName;
+}
+function mergeBoundarySourcesIntoMatchingMarkers(boundarySources, markerSources) {
+    const remainingBoundarySources = [];
+    for (const boundarySource of boundarySources) {
+        if (boundarySource.kind !== "boundary") {
+            continue;
+        }
+        const mergeTarget = findBoundaryMergeTarget(boundarySource, markerSources);
+        if (!mergeTarget || mergeTarget.kind !== "marker") {
+            remainingBoundarySources.push(boundarySource);
+            continue;
+        }
+        mergeTarget.boundaryLabels = [...(mergeTarget.boundaryLabels ?? []), boundarySource.displayName];
+        if (boundarySource.displayName !== REGION_END_CUE_NAME || areTimestampsEqual(mergeTarget.timestamp, boundarySource.timestamp)) {
+            mergeTarget.boundaryEventTimestamp = boundarySource.eventTimestamp;
+        }
+        mergeTarget.sortPriority = boundarySource.sortPriority;
+    }
+    return [...remainingBoundarySources, ...markerSources];
+}
+function createRegionEndCueTimestamp(region) {
+    const endValue = parseNumericTimestamp(region.end);
+    const startValue = parseNumericTimestamp(region.start);
+    if (endValue === undefined || (startValue !== undefined && endValue <= startValue)) {
+        return region.end;
+    }
+    const leadSeconds = REGION_END_CUE_LEAD_MS / 1000;
+    const minGapSeconds = REGION_END_CUE_MIN_GAP_MS / 1000;
+    let eventTimestamp = endValue - leadSeconds;
+    if (startValue !== undefined && eventTimestamp <= startValue && endValue - startValue > minGapSeconds) {
+        eventTimestamp = endValue - minGapSeconds;
+    }
+    if (startValue !== undefined && eventTimestamp < startValue && endValue > startValue) {
+        eventTimestamp = startValue;
+    }
+    return formatDerivedTimestamp(eventTimestamp);
+}
+function parseNumericTimestamp(timestamp) {
+    const trimmedTimestamp = timestamp.trim();
+    if (!NUMERIC_TIMESTAMP_PATTERN.test(trimmedTimestamp)) {
+        return undefined;
+    }
+    const parsedTimestamp = Number.parseFloat(trimmedTimestamp);
+    return Number.isFinite(parsedTimestamp) ? parsedTimestamp : undefined;
+}
+function formatDerivedTimestamp(timestamp) {
+    return timestamp.toFixed(3);
+}
+function findBoundaryMergeTarget(boundarySource, markerSources) {
+    if (boundarySource.kind !== "boundary") {
+        return undefined;
+    }
+    const matchingMarkerSources = markerSources.filter((source) => source.kind === "marker" && areTimestampsEqual(source.timestamp, boundarySource.timestamp));
+    if (matchingMarkerSources.length === 0) {
+        return boundarySource.displayName === REGION_END_CUE_NAME ? findRegionEndWindowMergeTarget(boundarySource, markerSources) : undefined;
+    }
+    return boundarySource.displayName === REGION_END_CUE_NAME ? matchingMarkerSources.at(-1) : matchingMarkerSources[0];
+}
+function findRegionEndWindowMergeTarget(boundarySource, markerSources) {
+    if (boundarySource.kind !== "boundary") {
+        return undefined;
+    }
+    const endTimestamp = parseNumericTimestamp(boundarySource.timestamp);
+    const shiftedEndTimestamp = parseNumericTimestamp(boundarySource.eventTimestamp);
+    if (endTimestamp === undefined || shiftedEndTimestamp === undefined) {
+        return undefined;
+    }
+    return markerSources
+        .filter((source) => {
+        if (source.kind !== "marker") {
+            return false;
+        }
+        const markerTimestamp = parseNumericTimestamp(source.timestamp);
+        return markerTimestamp !== undefined && markerTimestamp >= shiftedEndTimestamp && markerTimestamp < endTimestamp;
+    })
+        .at(-1);
+}
+function areTimestampsEqual(left, right) {
+    const leftTime = Number.parseFloat(left);
+    const rightTime = Number.parseFloat(right);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+        return leftTime === rightTime;
+    }
+    return left === right;
+}
+function compareRegionCuePlanSources(left, right) {
+    const leftTime = Number.parseFloat(left.timestamp);
+    const rightTime = Number.parseFloat(right.timestamp);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+    if (left.timestamp !== right.timestamp) {
+        return left.timestamp.localeCompare(right.timestamp);
+    }
+    if (left.sortPriority !== right.sortPriority) {
+        return left.sortPriority - right.sortPriority;
+    }
+    return left.sourceOrder - right.sourceOrder;
 }
 function resolveContainingRegion(start, regions) {
     const markerStart = Number.parseFloat(start);

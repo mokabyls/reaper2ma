@@ -4,7 +4,12 @@ import { describe, it } from "node:test";
 import { XMLParser } from "fast-xml-parser";
 
 import { convertReaperCsvToArtifacts, createConversionOutputFiles } from "../src/lib/reaper2ma/converter.js";
-import { convertReaperColorToCssColor, convertReaperColorToGrandmaAppearanceColor } from "../src/lib/reaper2ma/colors.js";
+import {
+    convertReaperColorToCssColor,
+    convertReaperColorToGrandmaAppearanceColor,
+    createInheritedRegionBumpColor,
+    createInheritedRegionLayerColor,
+} from "../src/lib/reaper2ma/colors.js";
 import { createExportBundleFiles } from "../src/lib/reaper2ma/export-bundle.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
@@ -33,6 +38,9 @@ const baseSettings: ConversionSettings = {
     bumpPageSlotStart: 101,
     cueStartNumber: 1,
     regionEndPreRollMs: 750,
+    autoOffRegionLayers: true,
+    regionLayerPreRollEnabled: true,
+    regionLayerPreRollMs: 750,
     speedMaster: "3.4",
     prefix: "1",
     exportMode: "cues-and-timecode",
@@ -64,6 +72,17 @@ function asArray<T>(value: T | T[] | undefined): T[] {
 function getMacroCommands(xml: string): string[] {
     const parsed = parseXml(xml);
     return asArray<any>(parsed.GMA3.Macro.MacroLine).map((line) => line["@_Command"]);
+}
+
+function getTimecodeTrackCommands(commands: string[], tempDataPoolName: string, trackIndex: number): string[] {
+    const assignCommand = `Assign DataPool "${tempDataPoolName}" Sequence ${trackIndex} At ${trackIndex}`;
+    const startIndex = commands.indexOf(assignCommand);
+
+    assert.notEqual(startIndex, -1);
+
+    const nextAssignIndex = commands.findIndex((command, index) => index > startIndex && /^Assign DataPool ".*" Sequence \d+ At \d+$/.test(command));
+
+    return commands.slice(startIndex, nextAssignIndex === -1 ? undefined : nextAssignIndex);
 }
 
 function readUint32(bytes: Uint8Array, offset: number): number {
@@ -276,6 +295,28 @@ describe("marker normalization", () => {
             regionLayerName: "FX",
             cueFade: "2",
         });
+        assert.deepEqual(parseMarkerName("[OFF_LAYER=FX] Stop FX"), {
+            displayName: "Stop FX",
+            execToken: "Go+",
+            tags: [{ key: "OFF_LAYER", value: "FX" }],
+            regionLayerActions: [{ kind: "OFF", scope: "layer", layerName: "FX" }],
+        });
+        assert.deepEqual(parseMarkerName("[OFF_LAYERS] Stop layers"), {
+            displayName: "Stop layers",
+            execToken: "Go+",
+            tags: [{ key: "OFF_LAYERS", value: null }],
+            regionLayerActions: [{ kind: "OFF", scope: "all" }],
+        });
+        assert.deepEqual(parseMarkerName("[R2][OFF_LAYER=Voix] Stop Voix"), {
+            displayName: "Stop Voix",
+            execToken: "Go+",
+            tags: [
+                { key: "R2", value: null },
+                { key: "OFF_LAYER", value: "Voix" },
+            ],
+            regionTargetId: "R2",
+            regionLayerActions: [{ kind: "OFF", scope: "layer", layerName: "Voix" }],
+        });
     });
 
     it("ignores invalid BPM metadata and keeps exporting", () => {
@@ -447,6 +488,8 @@ describe("marker normalization", () => {
         assert.equal(convertReaperColorToGrandmaAppearanceColor(""), undefined);
         assert.equal(convertReaperColorToCssColor("#00BFFF"), "rgb(0, 191, 255)");
         assert.equal(convertReaperColorToCssColor("not-a-color"), undefined);
+        assert.equal(createInheritedRegionLayerColor("#000000"), "#3D3D3D");
+        assert.equal(createInheritedRegionBumpColor("#000000"), "#6B6B6B");
     });
 });
 
@@ -851,13 +894,20 @@ R2,Chorus,10,20,10,
                     cues: [
                         {
                             cueNumber: 1,
+                            name: "Layer Pre-Roll",
+                            appearanceName: "R2MA Color F2FF00",
+                            cueFade: undefined,
+                            cueTiming: undefined,
+                        },
+                        {
+                            cueNumber: 2,
                             name: "Impact",
                             appearanceName: "R2MA Color F2FF00",
                             cueFade: "2",
                             cueTiming: [{ key: "FadeFromX", value: "0.5" }],
                         },
                         {
-                            cueNumber: 2,
+                            cueNumber: 3,
                             name: "Impact 2",
                             appearanceName: "R2MA Color F2FF00",
                             cueFade: undefined,
@@ -865,8 +915,9 @@ R2,Chorus,10,20,10,
                         },
                     ],
                     events: [
-                        { timestamp: "2", execToken: "Go+", cueNumber: 1, cueName: "Impact" },
-                        { timestamp: "3", execToken: "Go+", cueNumber: 2, cueName: "Impact 2" },
+                        { timestamp: "0.000", execToken: "Go+", cueNumber: 1, cueName: "Layer Pre-Roll" },
+                        { timestamp: "2", execToken: "Go+", cueNumber: 2, cueName: "Impact" },
+                        { timestamp: "3", execToken: "Go+", cueNumber: 3, cueName: "Impact 2" },
                     ],
                 },
                 {
@@ -877,13 +928,23 @@ R2,Chorus,10,20,10,
                     cues: [
                         {
                             cueNumber: 1,
+                            name: "Layer Pre-Roll",
+                            appearanceName: "R2MA Color 654321",
+                            cueFade: undefined,
+                            cueTiming: undefined,
+                        },
+                        {
+                            cueNumber: 2,
                             name: "Line",
                             appearanceName: "R2MA Color 654321",
                             cueFade: undefined,
                             cueTiming: undefined,
                         },
                     ],
-                    events: [{ timestamp: "4", execToken: "Load", cueNumber: 1, cueName: "Line" }],
+                    events: [
+                        { timestamp: "0.000", execToken: "Go+", cueNumber: 1, cueName: "Layer Pre-Roll" },
+                        { timestamp: "4", execToken: "Load", cueNumber: 2, cueName: "Line" },
+                    ],
                 },
                 {
                     regionId: "R2",
@@ -893,13 +954,20 @@ R2,Chorus,10,20,10,
                     cues: [
                         {
                             cueNumber: 1,
-                            name: "Prep FX",
+                            name: "Layer Pre-Roll",
                             appearanceName: "R2MA Color 654321",
                             cueFade: undefined,
                             cueTiming: undefined,
                         },
                         {
                             cueNumber: 2,
+                            name: "Prep FX",
+                            appearanceName: "R2MA Color 654321",
+                            cueFade: undefined,
+                            cueTiming: undefined,
+                        },
+                        {
+                            cueNumber: 3,
                             name: "Hit",
                             appearanceName: "R2MA Color F2FF00",
                             cueFade: undefined,
@@ -907,8 +975,9 @@ R2,Chorus,10,20,10,
                         },
                     ],
                     events: [
-                        { timestamp: "8", execToken: "Go+", cueNumber: 1, cueName: "Prep FX" },
-                        { timestamp: "12", execToken: "Go+", cueNumber: 2, cueName: "Hit" },
+                        { timestamp: "7.250", execToken: "Go+", cueNumber: 1, cueName: "Layer Pre-Roll" },
+                        { timestamp: "8", execToken: "Go+", cueNumber: 2, cueName: "Prep FX" },
+                        { timestamp: "12", execToken: "Go+", cueNumber: 3, cueName: "Hit" },
                     ],
                 },
             ],
@@ -919,11 +988,11 @@ R2,Chorus,10,20,10,
         assert.equal(commands.includes('Store DataPool "R2MA regionlayers" Sequence 3 "MA R1 - Verse - Voix"'), true);
         assert.equal(commands.includes('Store DataPool "R2MA regionlayers" Sequence 4 "MA R2 - Chorus"'), true);
         assert.equal(commands.includes('Store DataPool "R2MA regionlayers" Sequence 5 "MA R2 - Chorus - FX"'), true);
-        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 1 CueFade 2'), true);
-        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 1 Part 0.1 FadeFromX "0.5"'), true);
-        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 1 APPEARANCE="R2MA Color F2FF00"'), true);
-        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 3 Cue 1 APPEARANCE="R2MA Color 654321"'), true);
-        assert.equal(commands.includes('Set 1 "TOKEN" "Load"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 2 CueFade 2'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 2 Part 0.1 FadeFromX "0.5"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 2 APPEARANCE="R2MA Color F2FF00"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 3 Cue 2 APPEARANCE="R2MA Color 654321"'), true);
+        assert.equal(commands.includes('Set 2 "TOKEN" "Load"'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 5 Cue 1 At Timecode 1.1.5.1.1.1'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 1 At Page 1.201'), true);
@@ -965,6 +1034,118 @@ R1,Region A,0,5,5,
         assert.deepEqual(artifacts.uniqueCues.map((cue) => cue.displayName), ["Outside"]);
         assert.equal(artifacts.validationWarnings.some((warning) => warning.includes("[LAYER=FX]") && warning.includes("normal marker")), true);
         assert.equal(commands.includes('Label DataPool "R2MA outsidelayer" Sequence 1 Cue 1 "Outside"'), true);
+    });
+
+    it("emits manual layer Off events on targeted region layer tracks only", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Verse,0,10,10,
+R2,Chorus,10,20,10,
+1,[LAYER=FX] Impact,2,,,
+2,[LAYER=Voix] Line,3,,,
+3,[OFF_LAYER=FX] Stop FX,4,,,
+4,[OFF_LAYERS] Stop All,5,,,
+5,[R2][LAYER=FX] Prep FX,8,,,
+6,[R2][OFF_LAYER=FX] Stop R2 FX,9,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "layer-off.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const r1TrackCommands = getTimecodeTrackCommands(commands, "R2MA layeroff", 1);
+        const r1FxTrackCommands = getTimecodeTrackCommands(commands, "R2MA layeroff", 2);
+        const r1VoixTrackCommands = getTimecodeTrackCommands(commands, "R2MA layeroff", 3);
+        const r2FxTrackCommands = getTimecodeTrackCommands(commands, "R2MA layeroff", 5);
+
+        assert.deepEqual(
+            artifacts.regionLayerSequences.map((sequence) => `${sequence.regionId}:${sequence.layerName}`),
+            ["R1:FX", "R1:Voix", "R2:FX"],
+        );
+        assert.equal(r1TrackCommands.some((command) => command.includes('"TOKEN" "Off"')), false);
+        assert.equal(r1FxTrackCommands.includes('Set 3 "TIME" "4"'), true);
+        assert.equal(r1FxTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
+        assert.equal(r1FxTrackCommands.includes('Set 4 "TIME" "5"'), true);
+        assert.equal(r1FxTrackCommands.includes('Set 4 "TOKEN" "Off"'), true);
+        assert.equal(r1FxTrackCommands.includes('Assign DataPool "R2MA layeroff" Sequence 2 Cue 2 At Timecode 1.1.2.1.1.3'), false);
+        assert.equal(r1VoixTrackCommands.includes('Set 3 "TIME" "5"'), true);
+        assert.equal(r1VoixTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
+        assert.equal(r2FxTrackCommands.includes('Set 3 "TIME" "9"'), true);
+        assert.equal(r2FxTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
+        assert.equal(r2FxTrackCommands.includes('Assign DataPool "R2MA layeroff" Sequence 5 Cue 2 At Timecode 1.1.5.1.1.3'), false);
+    });
+
+    it("creates layer pre-roll cues and keeps auto-off as a separate end event", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,10,20,10,
+1,[LAYER=FX] Impact,12,,,
+`;
+        const defaultArtifacts = convertReaperCsvToArtifacts(csv, "auto-layer-off.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const disabledArtifacts = convertReaperCsvToArtifacts(csv, "auto-layer-off-disabled.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+            autoOffRegionLayers: false,
+        });
+        const customPreRollArtifacts = convertReaperCsvToArtifacts(csv, "auto-layer-pre-roll-custom.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+            regionLayerPreRollMs: 250,
+        });
+        const noPreRollArtifacts = convertReaperCsvToArtifacts(csv, "auto-layer-pre-roll-disabled.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+            regionLayerPreRollEnabled: false,
+        });
+        const defaultLayerTrack = getTimecodeTrackCommands(getMacroCommands(defaultArtifacts.macroXml), "R2MA autolayeroff", 2);
+        const disabledLayerTrack = getTimecodeTrackCommands(getMacroCommands(disabledArtifacts.macroXml), "R2MA autolayeroffdisabled", 2);
+        const customPreRollLayerTrack = getTimecodeTrackCommands(getMacroCommands(customPreRollArtifacts.macroXml), "R2MA autolayerprerollcustom", 2);
+        const noPreRollCommands = getMacroCommands(noPreRollArtifacts.macroXml);
+        const noPreRollLayerTrack = getTimecodeTrackCommands(noPreRollCommands, "R2MA autolayerprerolldisabled", 2);
+        const defaultTimeline = createTimelinePreview(defaultArtifacts, {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+
+        assert.equal(defaultLayerTrack.includes('Set 1 "TIME" "9.250"'), true);
+        assert.equal(defaultLayerTrack.includes('Set 1 "TOKEN" "Go+"'), true);
+        assert.equal(defaultLayerTrack.includes('Assign DataPool "R2MA autolayeroff" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
+        assert.equal(defaultLayerTrack.includes('Set 3 "TIME" "20"'), true);
+        assert.equal(defaultLayerTrack.includes('Set 3 "TOKEN" "Off"'), true);
+        assert.equal(defaultLayerTrack.includes('Assign DataPool "R2MA autolayeroff" Sequence 2 Cue 2 At Timecode 1.1.2.1.1.3'), false);
+        assert.equal(disabledLayerTrack.some((command) => command.includes('"TOKEN" "Off"')), false);
+        assert.equal(customPreRollLayerTrack.includes('Set 1 "TIME" "9.750"'), true);
+        assert.equal(customPreRollLayerTrack.includes('Set 1 "TOKEN" "Go+"'), true);
+        assert.equal(noPreRollCommands.includes('Label DataPool "R2MA autolayerprerolldisabled" Sequence 2 Cue 1 "Layer Pre-Roll"'), false);
+        assert.equal(noPreRollLayerTrack.includes('Set 1 "TIME" "12"'), true);
+        assert.deepEqual(defaultTimeline.tracks[1].events.map((event) => ({ timestamp: event.timestamp, token: event.token, label: event.label })), [
+            { timestamp: "9.250", token: "Go+", label: "Layer Pre-Roll" },
+            { timestamp: "12", token: "Go+", label: "Impact" },
+            { timestamp: "20", token: "Off", label: "Auto Off FX" },
+        ]);
+    });
+
+    it("warns for layer Off markers without a target region or missing target layer", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,5,5,
+1,[LAYER=FX] Impact,1,,,
+2,[OFF_LAYER=Missing] Stop Missing,2,,,
+3,[OFF_LAYER=FX] Outside,6,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "layer-off-warnings.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+
+        assert.equal(
+            artifacts.validationWarnings.some((warning) => warning.includes("[OFF_LAYER=Missing]") && warning.includes("does not exist")),
+            true,
+        );
+        assert.equal(
+            artifacts.validationWarnings.some((warning) => warning.includes("[OFF_LAYER=FX]") && warning.includes("without a target region")),
+            true,
+        );
     });
 
     it("merges region boundary cue names with markers at the same timestamp", () => {
@@ -1217,6 +1398,144 @@ R1,Region A,0,10,10,123456
         assert.equal(artifacts.regionSequences[0].cues[2].appearanceColor, 'COLOR="1,1,1,0" BackR=9 BackG=251 BackB=241 BackAlpha=221');
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 APPEARANCE="R2MA Color 123456"'), true);
         assert.equal(getMacroCommands(artifacts.macroXml).includes('Set DataPool "R2MA appearanceregion" Sequence 1 Cue 3 APPEARANCE="R2MA Color 654321"'), true);
+    });
+
+    it("lets uncolored layers inherit a lightened region color while explicit layer colors win", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Black Region,0,10,10,#000000
+1,[LAYER=FX] Inherited Hit,2,,,
+2,[LAYER=Color] Explicit Hit,3,,,#112233
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "layer-inherited-color.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const timeline = createTimelinePreview(artifacts, {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+
+        assert.deepEqual(
+            artifacts.regionLayerSequences.map((sequence) => ({
+                layerName: sequence.layerName,
+                color: sequence.color,
+                appearanceName: sequence.appearanceName,
+                appearanceNumber: sequence.appearanceNumber,
+                cueAppearances: sequence.cues.map((cue) => cue.appearanceName),
+            })),
+            [
+                {
+                    layerName: "FX",
+                    color: "#3D3D3D",
+                    appearanceName: "R2MA Color #3D3D3D",
+                    appearanceNumber: 9002,
+                    cueAppearances: ["R2MA Color #3D3D3D", "R2MA Color #3D3D3D"],
+                },
+                {
+                    layerName: "Color",
+                    color: "#112233",
+                    appearanceName: "R2MA Color #112233",
+                    appearanceNumber: 9003,
+                    cueAppearances: ["R2MA Color #112233", "R2MA Color #112233"],
+                },
+            ],
+        );
+        assert.deepEqual(timeline.tracks.map((track) => track.color), ["rgb(0, 0, 0)", "rgb(61, 61, 61)", "rgb(17, 34, 51)"]);
+        assert.equal(commands.includes('Label Appearance 9002 "R2MA Color #3D3D3D"'), true);
+        assert.equal(commands.includes('Set Appearance 9002 COLOR="1,1,1,0" BackR=61 BackG=61 BackB=61 BackAlpha=221'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA layerinheritedcolor" Sequence 2 APPEARANCE="R2MA Color #3D3D3D"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA layerinheritedcolor" Sequence 2 Cue 1 APPEARANCE="R2MA Color #3D3D3D"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA layerinheritedcolor" Sequence 3 APPEARANCE="R2MA Color #112233"'), true);
+    });
+
+    it("lets uncolored bumps inherit a lighter region color while explicit bump colors win", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Black Region,0,10,10,#000000
+1,[Temp] HIT,1,,,
+2,[Flash] SNAP,2,,,#112233
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "bump-inherited-color.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const timeline = createTimelinePreview(artifacts, {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+
+        assert.deepEqual(
+            artifacts.bumpSequences.map((sequence) => ({
+                color: sequence.color,
+                displayName: sequence.displayName,
+                appearanceName: sequence.appearanceName,
+                appearanceNumber: sequence.appearanceNumber,
+                cueAppearances: sequence.cues.map((cue) => cue.appearanceName),
+            })),
+            [
+                {
+                    color: "#6B6B6B",
+                    displayName: "MA 1 - BUMP - HIT",
+                    appearanceName: "R2MA Color #6B6B6B",
+                    appearanceNumber: 9002,
+                    cueAppearances: ["R2MA Color #6B6B6B"],
+                },
+                {
+                    color: "#112233",
+                    displayName: "MA 1 - BUMP - SNAP",
+                    appearanceName: "R2MA Color #112233",
+                    appearanceNumber: 9003,
+                    cueAppearances: ["R2MA Color #112233"],
+                },
+            ],
+        );
+        assert.deepEqual(timeline.tracks.map((track) => track.color), ["rgb(0, 0, 0)", "rgb(107, 107, 107)", "rgb(17, 34, 51)"]);
+        assert.equal(commands.includes('Label Appearance 9002 "R2MA Color #6B6B6B"'), true);
+        assert.equal(commands.includes('Set Appearance 9002 COLOR="1,1,1,0" BackR=107 BackG=107 BackB=107 BackAlpha=221'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA bumpinheritedcolor" Sequence 2 APPEARANCE="R2MA Color #6B6B6B"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA bumpinheritedcolor" Sequence 2 Cue 1 APPEARANCE="R2MA Color #6B6B6B"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA bumpinheritedcolor" Sequence 3 APPEARANCE="R2MA Color #112233"'), true);
+    });
+
+    it("keeps layer and bump color fallbacks when a region color is unreadable", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Bad Region,0,10,10,not-a-color
+1,[LAYER=FX] Layer Hit,1,,,
+2,[Temp] Bump Hit,2,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "invalid-region-color.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const timeline = createTimelinePreview(artifacts, {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+
+        assert.equal(artifacts.regionSequences[0].appearanceName, undefined);
+        assert.equal(artifacts.regionLayerSequences[0].color, "");
+        assert.equal(artifacts.regionLayerSequences[0].appearanceName, undefined);
+        assert.deepEqual(artifacts.regionLayerSequences[0].cues.map((cue) => cue.appearanceName), [undefined, undefined]);
+        assert.equal(artifacts.bumpSequences[0].color, "");
+        assert.equal(artifacts.bumpSequences[0].appearanceName, undefined);
+        assert.deepEqual(timeline.tracks.map((track) => track.color), ["#20c7d8", "#ff7ab6", "#f59e0b"]);
+        assert.equal(commands.some((command) => command.includes("not-a-color")), false);
+        assert.equal(commands.some((command) => command.includes("APPEARANCE=")), false);
+    });
+
+    it("does not create grandMA3 appearances for unreadable repeated marker colors", () => {
+        const csv = `#,Name,Start,Color
+1,Bad Color,0,not-a-color
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "invalid-marker-color.csv", baseSettings);
+        const commands = getMacroCommands(artifacts.macroXml);
+
+        assert.equal(artifacts.repeatedSequences.length, 1);
+        assert.equal(artifacts.repeatedSequences[0].appearanceName, undefined);
+        assert.equal(commands.some((command) => command.includes("Store Appearance")), false);
+        assert.equal(commands.some((command) => command.includes("APPEARANCE=")), false);
     });
 
     it("emits OFF before ON for compact region action tags", () => {

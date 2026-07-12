@@ -54,6 +54,9 @@ function collectAppearanceNumbers(artifacts) {
         }
     }
     for (const regionLayerSequence of artifacts.regionLayerSequences) {
+        if (regionLayerSequence.appearanceNumber !== undefined) {
+            appearanceNumbers.add(regionLayerSequence.appearanceNumber);
+        }
         for (const cue of regionLayerSequence.cues) {
             if (cue.appearanceNumber !== undefined) {
                 appearanceNumbers.add(cue.appearanceNumber);
@@ -63,6 +66,16 @@ function collectAppearanceNumbers(artifacts) {
     for (const repeatedSequence of artifacts.repeatedSequences) {
         if (repeatedSequence.appearanceNumber !== undefined) {
             appearanceNumbers.add(repeatedSequence.appearanceNumber);
+        }
+    }
+    for (const bumpSequence of artifacts.bumpSequences) {
+        if (bumpSequence.appearanceNumber !== undefined) {
+            appearanceNumbers.add(bumpSequence.appearanceNumber);
+        }
+        for (const cue of bumpSequence.cues) {
+            if (cue.appearanceNumber !== undefined) {
+                appearanceNumbers.add(cue.appearanceNumber);
+            }
         }
     }
     return appearanceNumbers;

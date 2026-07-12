@@ -11,9 +11,15 @@
         exampleMacroPresetGroups,
         parseReaperMarkerRows,
         clampRegionEndPreRollMs,
+        clampRegionLayerPreRollMs,
+        DEFAULT_AUTO_OFF_REGION_LAYERS,
         DEFAULT_REGION_END_PRE_ROLL_MS,
+        DEFAULT_REGION_LAYER_PRE_ROLL_ENABLED,
+        DEFAULT_REGION_LAYER_PRE_ROLL_MS,
         MAX_REGION_END_PRE_ROLL_MS,
+        MAX_REGION_LAYER_PRE_ROLL_MS,
         MIN_REGION_END_PRE_ROLL_MS,
+        MIN_REGION_LAYER_PRE_ROLL_MS,
         resolveExampleMacroTimecodeName,
         resolveSpeedMaster,
         stripFileExtension,
@@ -42,6 +48,9 @@
     let bumpPageSlotStart = 101;
     let cueStartNumber = 1;
     let regionEndPreRollMs = DEFAULT_REGION_END_PRE_ROLL_MS;
+    let autoOffRegionLayers = DEFAULT_AUTO_OFF_REGION_LAYERS;
+    let regionLayerPreRollEnabled = DEFAULT_REGION_LAYER_PRE_ROLL_ENABLED;
+    let regionLayerPreRollMs = DEFAULT_REGION_LAYER_PRE_ROLL_MS;
     let speedMasterNumber = 4;
     let resolvedSpeedMaster = "3.4";
     let prefix = "1";
@@ -103,6 +112,9 @@
         bumpPageSlotStart,
         cueStartNumber,
         regionEndPreRollMs,
+        autoOffRegionLayers,
+        regionLayerPreRollEnabled,
+        regionLayerPreRollMs,
         speedMaster: resolvedSpeedMaster,
         prefix,
         importMode,
@@ -151,6 +163,9 @@
         bumpPageSlotStart: number;
         cueStartNumber: number;
         regionEndPreRollMs: number;
+        autoOffRegionLayers: boolean;
+        regionLayerPreRollEnabled: boolean;
+        regionLayerPreRollMs: number;
         speedMasterNumber: number;
         prefix: string;
         importMode: ImportMode;
@@ -178,6 +193,9 @@
         bumpPageSlotStart,
         cueStartNumber,
         regionEndPreRollMs: clampRegionEndPreRollMs(regionEndPreRollMs),
+        autoOffRegionLayers,
+        regionLayerPreRollEnabled,
+        regionLayerPreRollMs: clampRegionLayerPreRollMs(regionLayerPreRollMs),
         speedMasterNumber: clampSpeedMasterNumber(speedMasterNumber),
         prefix,
         importMode,
@@ -205,6 +223,9 @@
         bumpPageSlotStart,
         cueStartNumber,
         regionEndPreRollMs: clampRegionEndPreRollMs(regionEndPreRollMs),
+        autoOffRegionLayers,
+        regionLayerPreRollEnabled,
+        regionLayerPreRollMs: clampRegionLayerPreRollMs(regionLayerPreRollMs),
         speedMaster: resolvedSpeedMaster,
         prefix,
         importMode,
@@ -328,6 +349,14 @@
             MIN_REGION_END_PRE_ROLL_MS,
             MAX_REGION_END_PRE_ROLL_MS,
         );
+        autoOffRegionLayers = readPersistedBoolean(storedSettings.autoOffRegionLayers, autoOffRegionLayers);
+        regionLayerPreRollEnabled = readPersistedBoolean(storedSettings.regionLayerPreRollEnabled, regionLayerPreRollEnabled);
+        regionLayerPreRollMs = readPersistedInteger(
+            storedSettings.regionLayerPreRollMs,
+            regionLayerPreRollMs,
+            MIN_REGION_LAYER_PRE_ROLL_MS,
+            MAX_REGION_LAYER_PRE_ROLL_MS,
+        );
         speedMasterNumber = readPersistedInteger(storedSettings.speedMasterNumber, speedMasterNumber, 1, 15);
         prefix = readPersistedString(storedSettings.prefix, prefix);
         importMode = isImportMode(storedSettings.importMode) ? storedSettings.importMode : importMode;
@@ -415,6 +444,10 @@
 
     function syncRegionEndPreRollMs() {
         regionEndPreRollMs = clampRegionEndPreRollMs(regionEndPreRollMs);
+    }
+
+    function syncRegionLayerPreRollMs() {
+        regionLayerPreRollMs = clampRegionLayerPreRollMs(regionLayerPreRollMs);
     }
 
     function createTimelineMinWidth(durationSeconds: number): number {
@@ -854,7 +887,7 @@
                         kind: "Layer",
                         cueCount: layerSequence.cues.length,
                         eventCount: layerSequence.events.length,
-                        appearanceName: "Cue appearances",
+                        appearanceName: layerSequence.appearanceName ?? "Cue appearances",
                         executorSlotGroup: "main" as const,
                     })),
             ]),
@@ -864,7 +897,7 @@
                 kind: "Repeat",
                 cueCount: sequence.cues.length,
                 eventCount: sequence.events.length,
-                appearanceName: sequence.appearanceName,
+                appearanceName: sequence.appearanceName ?? "Default",
                 executorSlotGroup: "main" as const,
             })),
             ...artifacts.bumpSequences.map((sequence) => ({
@@ -873,7 +906,7 @@
                 kind: "Bump",
                 cueCount: sequence.cues.length,
                 eventCount: sequence.events.length,
-                appearanceName: "Overlay",
+                appearanceName: sequence.appearanceName ?? "Overlay",
                 executorSlotGroup: "bump" as const,
             })),
         );
@@ -1426,6 +1459,7 @@
                         <code>Intro [Temp|Flash]</code>
                         <code>[R2] Prep cue before region</code>
                         <code>[ON_R2|OFF_R1] Arm next region</code>
+                        <code>[OFF_LAYER=FX] / [R2][OFF_LAYERS]</code>
                     </div>
                 </div>
 
@@ -1434,30 +1468,82 @@
                         <span class="label-text">Advanced</span>
                         <span class="label-hint">Additional options</span>
                     </summary>
-                    <div class="advanced-settings-grid">
-                        <div class="input-group">
-                            <label for="cue-start-number" class="label">
-                                <span class="label-text">Cue Start Number</span>
-                                <span class="label-hint">Starting number for cues (1-9999)</span>
-                            </label>
-                            <input id="cue-start-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
+                    <div class="advanced-settings-sections">
+                        <div class="advanced-settings-group">
+                            <div class="advanced-settings-title">
+                                <strong>Region cues</strong>
+                                <span>Boundary and cue numbering options for region sequences.</span>
+                            </div>
+
+                            <div class="advanced-settings-grid">
+                                <div class="input-group">
+                                    <label for="cue-start-number" class="label">
+                                        <span class="label-text">Cue Start Number</span>
+                                        <span class="label-hint">Starting number for cues (1-9999)</span>
+                                    </label>
+                                    <input id="cue-start-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
+                                </div>
+
+                                <div class="input-group">
+                                    <label for="region-end-pre-roll-ms" class="label">
+                                        <span class="label-text">Region End pre-roll</span>
+                                        <span class="label-hint">Milliseconds before region end unless a later marker takes over</span>
+                                    </label>
+                                    <input
+                                        id="region-end-pre-roll-ms"
+                                        type="number"
+                                        min={MIN_REGION_END_PRE_ROLL_MS}
+                                        max={MAX_REGION_END_PRE_ROLL_MS}
+                                        step="50"
+                                        bind:value={regionEndPreRollMs}
+                                        on:change={syncRegionEndPreRollMs}
+                                        class="input"
+                                    />
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="input-group">
-                            <label for="region-end-pre-roll-ms" class="label">
-                                <span class="label-text">Region End pre-roll</span>
-                                <span class="label-hint">Milliseconds before region end unless a later marker takes over</span>
-                            </label>
-                            <input
-                                id="region-end-pre-roll-ms"
-                                type="number"
-                                min={MIN_REGION_END_PRE_ROLL_MS}
-                                max={MAX_REGION_END_PRE_ROLL_MS}
-                                step="50"
-                                bind:value={regionEndPreRollMs}
-                                on:change={syncRegionEndPreRollMs}
-                                class="input"
-                            />
+                        <div class="advanced-settings-group">
+                            <div class="advanced-settings-title">
+                                <strong>Region layers</strong>
+                                <span>Pre-roll and automatic Off behavior for layer sequences attached to regions.</span>
+                            </div>
+
+                            <div class="advanced-settings-grid layer-off-settings-grid">
+                                <label class="macro-group-toggle advanced-toggle">
+                                    <input type="checkbox" bind:checked={regionLayerPreRollEnabled} class="macro-checkbox" />
+                                    <span>
+                                        <span class="label-text">Create layer pre-roll</span>
+                                        <span class="label-hint">Create a Layer Pre-Roll cue before the first layer cue</span>
+                                    </span>
+                                </label>
+
+                                <div class="input-group" class:disabled={!regionLayerPreRollEnabled}>
+                                    <label for="region-layer-pre-roll-ms" class="label">
+                                        <span class="label-text">Layer pre-roll</span>
+                                        <span class="label-hint">Milliseconds before the layer sequence starts</span>
+                                    </label>
+                                    <input
+                                        id="region-layer-pre-roll-ms"
+                                        type="number"
+                                        min={MIN_REGION_LAYER_PRE_ROLL_MS}
+                                        max={MAX_REGION_LAYER_PRE_ROLL_MS}
+                                        step="50"
+                                        bind:value={regionLayerPreRollMs}
+                                        on:change={syncRegionLayerPreRollMs}
+                                        class="input"
+                                        disabled={!regionLayerPreRollEnabled}
+                                    />
+                                </div>
+
+                                <label class="macro-group-toggle advanced-toggle">
+                                    <input type="checkbox" bind:checked={autoOffRegionLayers} class="macro-checkbox" />
+                                    <span>
+                                        <span class="label-text">Auto Off region layers</span>
+                                        <span class="label-hint">Emit Off events on each layer track at the end of its parent region</span>
+                                    </span>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </details>
@@ -2129,6 +2215,11 @@
                         <div class="usage-title">Region layers</div>
                         <code>[LAYER=FX] Impact / [R2][LAYER=Voix] Pré-roll</code>
                         <p><code>LAYER=...</code> creates a parallel sequence attached to the containing or targeted region.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Region layer Off</div>
+                        <code>[OFF_LAYER=FX] / [OFF_LAYERS] / [R2][OFF_LAYER=Voix]</code>
+                        <p><code>OFF_LAYER</code> emits an Off event on one layer track; <code>OFF_LAYERS</code> emits Off events on every layer of the containing or targeted region.</p>
                     </div>
                     <div class="usage-item">
                         <div class="usage-title">Global markers</div>
@@ -2836,6 +2927,11 @@
         margin: 1rem 0;
     }
 
+    .advanced-toggle {
+        align-self: start;
+        padding: 0.4rem 0;
+    }
+
     .macro-checkbox {
         width: 18px;
         height: 18px;
@@ -3065,6 +3161,40 @@
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 1rem;
+    }
+
+    .advanced-settings-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+    }
+
+    .advanced-settings-group + .advanced-settings-group {
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .advanced-settings-title {
+        margin-bottom: 0.85rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+
+    .advanced-settings-title strong {
+        color: var(--text-primary);
+        font-size: 0.92rem;
+        text-transform: uppercase;
+        letter-spacing: 0;
+    }
+
+    .advanced-settings-title span {
+        color: var(--text-secondary);
+        font-size: 0.84rem;
+    }
+
+    .layer-off-settings-grid {
+        align-items: start;
     }
 
     .settings-grid {

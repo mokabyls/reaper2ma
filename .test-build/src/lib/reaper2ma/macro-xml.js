@@ -137,6 +137,7 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, regionL
             cueNumber: settings.cueStartNumber + index,
             cueName: cue.cueName,
             ...(cue.regionActions?.length ? { regionActions: cue.regionActions } : {}),
+            ...(cue.regionLayerActions?.length ? { regionLayerActions: cue.regionLayerActions } : {}),
             ...(cue.cueFade !== undefined ? { cueFade: cue.cueFade } : {}),
             ...(cue.cueTiming !== undefined ? { cueTiming: cue.cueTiming } : {}),
         }));
@@ -167,6 +168,15 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, regionL
                 cues: layerSequence.cues,
                 events: layerSequence.events,
                 offCueBehavior: { kind: "follow" },
+                ...(layerSequence.appearanceName ? { appearanceName: layerSequence.appearanceName } : {}),
+                ...(layerSequence.appearanceNumber !== undefined ? { appearanceNumber: layerSequence.appearanceNumber } : {}),
+                ...(layerSequence.appearanceColor ? { appearanceColor: layerSequence.appearanceColor } : {}),
+                regionLayer: {
+                    regionId: layerSequence.regionId,
+                    layerName: layerSequence.layerName,
+                    start: layerSequence.start,
+                    end: layerSequence.end,
+                },
             });
         }
     }
@@ -190,6 +200,9 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, regionL
             events: sequence.events,
             offCueBehavior: { kind: "timed", releaseDurationSeconds: sequence.releaseDurationSeconds },
             executorSlotGroup: "bump",
+            ...(sequence.appearanceName ? { appearanceName: sequence.appearanceName } : {}),
+            ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
+            ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
         });
     }
     if (bpmSequence) {
@@ -252,8 +265,11 @@ function createTimecodeCommands(settings, tempDataPoolName, filename, sequences,
     if (settings.exportMode !== "cues-and-timecode" || sequences.length === 0) {
         return [];
     }
-    const duration = calculateTimecodeDuration(collectTimecodeTimestamps(uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence));
-    const eventsBySequence = collectTimecodeEventsBySequence(sequences);
+    const eventsBySequence = collectTimecodeEventsBySequence(sequences, settings);
+    const duration = calculateTimecodeDuration([
+        ...collectTimecodeTimestamps(uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence),
+        ...[...eventsBySequence.values()].flatMap((events) => events.map((event) => event.timestamp)),
+    ]);
     const commands = [
         createCommand("cd root"),
         createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1`),
@@ -286,9 +302,13 @@ function createTimecodeCommands(settings, tempDataPoolName, filename, sequences,
     }
     return commands;
 }
-function collectTimecodeEventsBySequence(sequences) {
+function collectTimecodeEventsBySequence(sequences, settings) {
     const eventsBySequence = new Map(sequences.map((sequence) => [sequence.localSequenceNumber, []]));
     const regionSequencesById = new Map(sequences.filter((sequence) => sequence.regionId).map((sequence) => [sequence.regionId, sequence]));
+    const regionLayerSequencesByKey = new Map(sequences
+        .filter((sequence) => sequence.regionLayer)
+        .map((sequence) => [createRegionLayerKey(sequence.regionLayer.regionId, sequence.regionLayer.layerName), sequence]));
+    const regionLayerSequencesByRegionId = groupGeneratedRegionLayerSequencesByRegionId(sequences);
     let sourceOrder = 0;
     for (const sequence of sequences) {
         const sequenceEvents = eventsBySequence.get(sequence.localSequenceNumber);
@@ -316,12 +336,59 @@ function collectTimecodeEventsBySequence(sequences) {
                     sourceOrder: sourceOrder++,
                 });
             }
+            for (const action of event.regionLayerActions ?? []) {
+                const targetSequences = resolveRegionLayerActionSequences(action, regionLayerSequencesByKey, regionLayerSequencesByRegionId);
+                for (const targetSequence of targetSequences) {
+                    eventsBySequence.get(targetSequence.localSequenceNumber)?.push({
+                        timestamp: event.timestamp,
+                        token: "Off",
+                        priority: 0,
+                        sourceOrder: sourceOrder++,
+                    });
+                }
+            }
+        }
+    }
+    if (settings.autoOffRegionLayers !== false) {
+        for (const sequence of sequences) {
+            if (!sequence.regionLayer) {
+                continue;
+            }
+            eventsBySequence.get(sequence.localSequenceNumber)?.push({
+                timestamp: sequence.regionLayer.end,
+                token: "Off",
+                priority: 3,
+                sourceOrder: sourceOrder++,
+            });
         }
     }
     for (const events of eventsBySequence.values()) {
         events.sort(compareTimecodeMacroEvents);
     }
     return eventsBySequence;
+}
+function groupGeneratedRegionLayerSequencesByRegionId(sequences) {
+    const sequencesByRegionId = new Map();
+    for (const sequence of sequences) {
+        if (!sequence.regionLayer) {
+            continue;
+        }
+        sequencesByRegionId.set(sequence.regionLayer.regionId, [...(sequencesByRegionId.get(sequence.regionLayer.regionId) ?? []), sequence]);
+    }
+    return sequencesByRegionId;
+}
+function resolveRegionLayerActionSequences(action, regionLayerSequencesByKey, regionLayerSequencesByRegionId) {
+    if (!action.regionId) {
+        return [];
+    }
+    if (action.scope === "all") {
+        return regionLayerSequencesByRegionId.get(action.regionId) ?? [];
+    }
+    const targetSequence = regionLayerSequencesByKey.get(createRegionLayerKey(action.regionId, action.layerName));
+    return targetSequence ? [targetSequence] : [];
+}
+function createRegionLayerKey(regionId, layerName) {
+    return `${regionId}\u0000${layerName}`;
 }
 function sortRegionActions(actions) {
     return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));

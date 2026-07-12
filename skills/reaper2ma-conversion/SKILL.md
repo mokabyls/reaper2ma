@@ -29,12 +29,17 @@ Use this skill to preserve the domain rules behind the converter. The important 
 - Allocate repeated sequence numbers from `sequenceNumber + 1`.
 - In regions-and-markers mode, name generated region sequences from region ID plus sanitized region label, for example `R2 - Introduction - Sub Region`.
 - In regions-and-markers mode, route `[LAYER=Name]` markers into region-scoped layer sequences attached to the containing or explicitly targeted region, for example `[R2][LAYER=Voix]`.
+- In regions-and-markers mode, uncolored layer markers inherit the readable target region color lightened by 24%; use that derived color for the layer sequence, uncolored layer cues, `Layer Pre-Roll`, grandMA3 appearance, and timeline. Explicit layer marker colors remain authoritative and are not lightened.
+- In regions-and-markers mode, route `[OFF_LAYER=Name]` and `[OFF_LAYERS]` into derived `Off` timecode events on region layer tracks. They use the containing region or an explicit `[R2]` target, and they do not affect `OFF_Rx`.
+- Region layer pre-roll is enabled by default. It adds a `Layer Pre-Roll` cue/event at the beginning of each layer sequence before the first layer cue.
+- Auto Off for region layers is enabled by default. It emits derived `Off` events on every layer track at the parent region end.
 - Allow `[GLOBAL]` or `[MAIN]` markers to stay in the main sequence even when they fall inside a region.
 - Route `Temp` and `Flash` execution tokens into bump overlay sequences, grouped by color and cue name.
+- In regions-and-markers mode, uncolored bump markers keep their region context while routing to bump overlays. If the context region has a readable color, group and display the bump with that region color lightened by 42%; explicit bump marker colors remain authoritative.
 - Parse leading or trailing `[]` blocks for `BPM`, `CueFade`, cue timing modifiers, and execution tokens. Cue timing families should stay isolated in their own providers.
 - Parse bump release tags as `Release_...`, `TempRelease`, and `FlashRelease`; use them to configure a timed `OffCue`, with a 0.2 second fallback when no release tag is present.
 - Validate cue timing modifiers and emit them as grandMA3 `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...` commands.
-- Create one grandMA3 appearance per distinct Reaper color, starting at the configured appearance ID.
+- Create one grandMA3 appearance per distinct readable Reaper color, starting at the configured appearance ID. Derived layer and bump inherited colors are real distinct colors with their own appearance IDs.
 - Convert appearance colors from decimal Reaper values, `0x...`, `#RRGGBB`, and six-digit hex values with A-F characters. Macro output uses grandMA background channels: `COLOR="1,1,1,0" BackR={0..255} BackG={0..255} BackB={0..255} BackAlpha=221`.
 - Apply the configured `Speed Master` to every generated sequence.
 - Always generate macro XML.
@@ -49,10 +54,11 @@ Use this skill to preserve the domain rules behind the converter. The important 
 - Unique cue macro commands store a cue range in the local base sequence, label each cue, and then apply optional cue fade/timing commands.
 - If the base sequence has no unique cues, skip base-sequence macro commands rather than emitting `Cue 1 thru 0`.
 - Repeated sequence macro commands store a named local sequence, store cue ranges with `/Merge`, assign an appearance, and set OffCue `TRIGTYPE` to `Follow`.
-- Region layer macro commands are stored immediately after their parent region sequence, use cue-level appearances from marker colors, and set OffCue `TRIGTYPE` to `Follow`.
-- Bump macro commands follow the same storage/naming pattern as repeated sequences, but configure a timed `OffCue` instead of emitting release timecode events.
+- Region layer macro commands are stored immediately after their parent region sequence, optionally start with a `Layer Pre-Roll` cue/event, use effective layer appearances from marker or inherited region colors, and set OffCue `TRIGTYPE` to `Follow`.
+- Bump macro commands follow the same storage/naming pattern as repeated sequences, use effective bump appearances from marker or inherited region colors, but configure a timed `OffCue` instead of emitting release timecode events.
 - Timecode commands use the CuePoints-style pattern: `Store DataPool "{temp}" Timecode 1`, `Assign DataPool "{temp}" Sequence {local} At {track}`, `Store Type "CmdSubTrack" 1`, `Set {event} "TIME" "{Start}"`, `Set {event} "TOKEN" "{execToken}"`, and `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.1.{track}.1.1.{event}`.
 - `OFF_Rx` creates an `Off` event on the target region track without cue assignment. `ON_Rx` creates a `Goto|Go+` event assigned to cue 1 on the target region track.
+- `[OFF_LAYER=Name]`, `[OFF_LAYERS]`, and automatic region-layer Off create `Off` events on layer tracks without cue assignment. Do not model layer extinction as layer `Region End` cues.
 - Do not generate a separate `GMA3.Timecode`, `RealtimeCmd`, `CueDestination`, `ValCueDestination`, grandMA internal numeric object/cue references, audio tracks, or fader subtracks from CSV-only input.
 - Use `XMLBuilder` rather than manual string assembly unless there is a strong reason.
 

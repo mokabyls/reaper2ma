@@ -25,6 +25,19 @@ export type RegionActionTag = {
     regionId: string;
 };
 
+export type RegionLayerActionTag =
+    | {
+          kind: "OFF";
+          scope: "layer";
+          layerName: string;
+          regionId?: string;
+      }
+    | {
+          kind: "OFF";
+          scope: "all";
+          regionId?: string;
+      };
+
 export type BumpActionTag = {
     kind: "Temp" | "Flash";
     phase: "start" | "release";
@@ -63,12 +76,16 @@ export type ConvertedMarker = {
     isGlobal?: boolean;
     bumpAction?: BumpActionTag;
     regionActions?: RegionActionTag[];
+    regionLayerActions?: RegionLayerActionTag[];
     regionLayerName?: string;
     start: string;
     color: string;
     regionTargetId?: string;
     regionId?: string;
     regionLabel?: string;
+    regionContextId?: string;
+    regionContextLabel?: string;
+    regionContextColor?: string;
     bpm?: number;
     bpmText?: string;
     cueFade?: string;
@@ -92,6 +109,7 @@ export type SequenceTrigger = {
     cueNumber: number;
     cueName: string;
     regionActions?: RegionActionTag[];
+    regionLayerActions?: RegionLayerActionTag[];
     cueFade?: string;
     cueTiming?: CueTimingTag[];
 };
@@ -101,9 +119,9 @@ export type RepeatedSequence = {
     displayName: string;
     cues: SequenceCue[];
     events: SequenceTrigger[];
-    appearanceName: string;
-    appearanceNumber: number;
-    appearanceColor: string;
+    appearanceName?: string;
+    appearanceNumber?: number;
+    appearanceColor?: string;
     sequenceNumber: number;
 };
 
@@ -132,6 +150,9 @@ export type RegionLayerSequence = {
     color: string;
     cues: SequenceCue[];
     events: SequenceTrigger[];
+    appearanceName?: string;
+    appearanceNumber?: number;
+    appearanceColor?: string;
     sequenceNumber: number;
 };
 
@@ -140,6 +161,9 @@ export type BumpSequence = {
     displayName: string;
     cues: SequenceCue[];
     events: SequenceTrigger[];
+    appearanceName?: string;
+    appearanceNumber?: number;
+    appearanceColor?: string;
     releaseDurationSeconds: string;
     releaseWarnings?: string[];
     sequenceNumber: number;
@@ -170,6 +194,9 @@ export type ConversionSettings = {
     bumpPageSlotStart: number;
     cueStartNumber: number;
     regionEndPreRollMs: number;
+    autoOffRegionLayers: boolean;
+    regionLayerPreRollEnabled: boolean;
+    regionLayerPreRollMs: number;
     speedMaster: string;
     prefix: string;
     exportMode: ExportMode;

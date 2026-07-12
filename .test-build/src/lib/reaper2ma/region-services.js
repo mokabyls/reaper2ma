@@ -1,7 +1,9 @@
 import { sanitizeMarkerName } from "./marker-parser.js";
-import { clampRegionEndPreRollMs, DEFAULT_REGION_END_PRE_ROLL_MS } from "./settings.js";
+import { clampRegionEndPreRollMs, clampRegionLayerPreRollMs, DEFAULT_REGION_END_PRE_ROLL_MS, DEFAULT_REGION_LAYER_PRE_ROLL_ENABLED, DEFAULT_REGION_LAYER_PRE_ROLL_MS, } from "./settings.js";
+import { createInheritedRegionLayerColor } from "./colors.js";
 const REGION_START_CUE_NAME = "Region Start";
 const REGION_END_CUE_NAME = "Region End";
+const REGION_LAYER_PRE_ROLL_CUE_NAME = "Layer Pre-Roll";
 const REGION_END_CUE_MIN_GAP_MS = 1;
 const NUMERIC_TIMESTAMP_PATTERN = /^-?\d+(?:\.\d+)?$/;
 export function parseRegions(rows) {
@@ -30,19 +32,46 @@ export function parseRegions(rows) {
 }
 export function assignMarkersToRegions(markers, regions) {
     return markers.map((marker) => {
-        if (marker.isGlobal || marker.bumpAction !== undefined) {
-            return marker;
-        }
-        const region = resolveTargetRegion(marker.regionTargetId, regions) ?? resolveContainingRegion(marker.start, regions);
-        if (!region) {
-            return marker;
+        const explicitRegion = resolveTargetRegion(marker.regionTargetId, regions);
+        const containingRegion = resolveContainingRegion(marker.start, regions);
+        const region = explicitRegion ?? containingRegion;
+        const markerWithRegionContext = assignRegionContext(marker, region);
+        const markerWithRegionLayerActions = assignRegionLayerActionTargets(markerWithRegionContext, region);
+        if (marker.isGlobal || marker.bumpAction !== undefined || !region) {
+            return markerWithRegionLayerActions;
         }
         return {
-            ...marker,
+            ...markerWithRegionLayerActions,
             regionId: region.regionId,
             regionLabel: region.regionLabel,
         };
     });
+}
+function assignRegionContext(marker, region) {
+    if (!region) {
+        return marker;
+    }
+    return {
+        ...marker,
+        regionContextId: region.regionId,
+        regionContextLabel: region.regionLabel,
+        regionContextColor: region.color,
+    };
+}
+function assignRegionLayerActionTargets(marker, region) {
+    if (!marker.regionLayerActions?.length) {
+        return marker;
+    }
+    const regionLayerActions = marker.regionLayerActions.map((action) => action.regionId || !region
+        ? action
+        : {
+            ...action,
+            regionId: region.regionId,
+        });
+    return {
+        ...marker,
+        regionLayerActions,
+    };
 }
 function resolveTargetRegion(regionTargetId, regions) {
     if (!regionTargetId) {
@@ -50,10 +79,11 @@ function resolveTargetRegion(regionTargetId, regions) {
     }
     return regions.find((region) => region.regionId === regionTargetId);
 }
-export function buildRegionSequences(markers, regions, sequenceNumber, resolveAppearance, regionEndPreRollMs = DEFAULT_REGION_END_PRE_ROLL_MS) {
+export function buildRegionSequences(markers, regions, sequenceNumber, resolveAppearance, regionEndPreRollMs = DEFAULT_REGION_END_PRE_ROLL_MS, regionLayerPreRollEnabled = DEFAULT_REGION_LAYER_PRE_ROLL_ENABLED, regionLayerPreRollMs = DEFAULT_REGION_LAYER_PRE_ROLL_MS) {
     const regionSequences = [];
     const regionLayerSequences = [];
     const resolvedRegionEndPreRollMs = clampRegionEndPreRollMs(regionEndPreRollMs);
+    const resolvedRegionLayerPreRollMs = clampRegionLayerPreRollMs(regionLayerPreRollMs);
     let nextSequenceNumber = sequenceNumber + 1;
     regions.forEach((region) => {
         const regionMarkers = markers
@@ -99,6 +129,11 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
                     regionActions: cue.regionActions,
                 }
                 : {}),
+            ...(cue.regionLayerActions?.length
+                ? {
+                    regionLayerActions: cue.regionLayerActions,
+                }
+                : {}),
             ...(cue.cueFade !== undefined
                 ? {
                     cueFade: cue.cueFade,
@@ -128,7 +163,7 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
                 : {}),
             sequenceNumber: nextSequenceNumber++,
         });
-        regionLayerSequences.push(...buildRegionLayerSequences(region, layerMarkers, nextSequenceNumber, resolveAppearance).map((sequence) => {
+        regionLayerSequences.push(...buildRegionLayerSequences(region, layerMarkers, nextSequenceNumber, resolveAppearance, regionLayerPreRollEnabled, resolvedRegionLayerPreRollMs).map((sequence) => {
             nextSequenceNumber = sequence.sequenceNumber + 1;
             return sequence;
         }));
@@ -143,7 +178,7 @@ function createRegionSequenceDisplayName(region) {
     const regionLabel = sanitizeMarkerName(region.regionLabel).trim();
     return regionLabel ? `${region.regionId} - ${regionLabel}` : region.regionId;
 }
-function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppearance) {
+function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppearance, regionLayerPreRollEnabled, regionLayerPreRollMs) {
     const layerGroups = new Map();
     let nextSequenceNumber = sequenceNumber;
     for (const marker of markers) {
@@ -154,7 +189,12 @@ function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppea
         layerGroups.set(layerName, [...(layerGroups.get(layerName) ?? []), marker]);
     }
     return [...layerGroups.entries()].map(([layerName, layerMarkers]) => {
-        const cuePlan = createRegionLayerCuePlan(layerMarkers, resolveAppearance);
+        const inheritedLayerColor = createInheritedRegionLayerColor(region.color);
+        const firstMarkerColor = layerMarkers.find((marker) => marker.color)?.color;
+        const sequenceColor = firstMarkerColor ?? inheritedLayerColor ?? "";
+        const sequenceAppearanceReference = sequenceColor ? resolveAppearance(sequenceColor) : undefined;
+        const inheritedAppearanceReference = inheritedLayerColor ? resolveAppearance(inheritedLayerColor) : undefined;
+        const cuePlan = createRegionLayerCuePlan(region, layerMarkers, resolveAppearance, regionLayerPreRollEnabled, regionLayerPreRollMs, inheritedAppearanceReference, sequenceAppearanceReference);
         return {
             regionId: region.regionId,
             regionLabel: region.regionLabel,
@@ -162,7 +202,7 @@ function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppea
             displayName: createRegionLayerSequenceDisplayName(region, layerName),
             start: region.start,
             end: region.end,
-            color: layerMarkers.find((marker) => marker.color)?.color ?? region.color,
+            color: sequenceColor,
             cues: cuePlan.map((cue) => ({
                 cueNumber: cue.cueNumber,
                 name: cue.name,
@@ -182,9 +222,17 @@ function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppea
                 cueNumber: cue.cueNumber,
                 cueName: cue.name,
                 ...(cue.regionActions?.length ? { regionActions: cue.regionActions } : {}),
+                ...(cue.regionLayerActions?.length ? { regionLayerActions: cue.regionLayerActions } : {}),
                 ...(cue.cueFade !== undefined ? { cueFade: cue.cueFade } : {}),
                 ...(cue.cueTiming !== undefined ? { cueTiming: cue.cueTiming } : {}),
             })),
+            ...(sequenceAppearanceReference
+                ? {
+                    appearanceName: sequenceAppearanceReference.appearanceName,
+                    appearanceNumber: sequenceAppearanceReference.appearanceNumber,
+                    appearanceColor: sequenceAppearanceReference.appearanceColor,
+                }
+                : {}),
             sequenceNumber: nextSequenceNumber++,
         };
     });
@@ -192,14 +240,14 @@ function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppea
 function createRegionLayerSequenceDisplayName(region, layerName) {
     return `${createRegionSequenceDisplayName(region)} - ${layerName}`;
 }
-function createRegionLayerCuePlan(markers, resolveAppearance) {
+function createRegionLayerCuePlan(region, markers, resolveAppearance, regionLayerPreRollEnabled, regionLayerPreRollMs, inheritedAppearanceReference, preRollAppearanceReference) {
     const seenNames = new Map();
-    return markers.map((marker, index) => {
-        const cueNumber = index + 1;
+    const markerCuePlan = markers.map((marker, index) => {
+        const cueNumber = index + (regionLayerPreRollEnabled ? 2 : 1);
         const sanitizedName = sanitizeMarkerName(marker.displayName).trim();
         const baseName = sanitizedName || `Cue ${cueNumber}`;
         const count = (seenNames.get(baseName) ?? 0) + 1;
-        const appearanceReference = marker.color ? resolveAppearance(marker.color) : undefined;
+        const appearanceReference = marker.color ? resolveAppearance(marker.color) : inheritedAppearanceReference;
         seenNames.set(baseName, count);
         return {
             timestamp: marker.start,
@@ -208,10 +256,24 @@ function createRegionLayerCuePlan(markers, resolveAppearance) {
             name: count === 1 ? baseName : `${baseName} ${count}`,
             ...(appearanceReference ? { appearanceReference } : {}),
             ...(marker.regionActions?.length ? { regionActions: marker.regionActions } : {}),
+            ...(marker.regionLayerActions?.length ? { regionLayerActions: marker.regionLayerActions } : {}),
             ...(marker.cueFade !== undefined ? { cueFade: marker.cueFade } : {}),
             ...(marker.cueTiming !== undefined ? { cueTiming: marker.cueTiming } : {}),
         };
     });
+    if (!regionLayerPreRollEnabled) {
+        return markerCuePlan;
+    }
+    return [
+        {
+            timestamp: createRegionLayerPreRollTimestamp(region, markers, regionLayerPreRollMs),
+            execToken: "Go+",
+            cueNumber: 1,
+            name: REGION_LAYER_PRE_ROLL_CUE_NAME,
+            ...(preRollAppearanceReference ? { appearanceReference: preRollAppearanceReference } : {}),
+        },
+        ...markerCuePlan,
+    ];
 }
 function createRegionCuePlan(region, markers, resolveAppearance, regionEndPreRollMs) {
     const seenNames = new Map();
@@ -267,6 +329,11 @@ function createRegionCuePlan(region, markers, resolveAppearance, regionEndPreRol
                     regionActions: source.marker.regionActions,
                 }
                 : {}),
+            ...(source.marker.regionLayerActions?.length
+                ? {
+                    regionLayerActions: source.marker.regionLayerActions,
+                }
+                : {}),
             ...(source.marker.cueFade !== undefined
                 ? {
                     cueFade: source.marker.cueFade,
@@ -310,13 +377,14 @@ function mergeBoundarySourcesIntoMatchingMarkers(boundarySources, markerSources)
     }
     return [...remainingBoundarySources, ...markerSources];
 }
-function createRegionEndCueTimestamp(region, regionEndPreRollMs) {
-    const endValue = parseNumericTimestamp(region.end);
-    const startValue = parseNumericTimestamp(region.start);
+export function createRegionPreRollTimestamp(regionStart, regionEnd, preRollMs) {
+    const endValue = parseNumericTimestamp(regionEnd);
+    const startValue = parseNumericTimestamp(regionStart);
     if (endValue === undefined || (startValue !== undefined && endValue <= startValue)) {
-        return region.end;
+        return regionEnd;
     }
-    const leadSeconds = clampRegionEndPreRollMs(regionEndPreRollMs) / 1000;
+    const numericPreRollMs = Number(preRollMs);
+    const leadSeconds = (Number.isFinite(numericPreRollMs) ? Math.max(0, Math.trunc(numericPreRollMs)) : 0) / 1000;
     const minGapSeconds = REGION_END_CUE_MIN_GAP_MS / 1000;
     let eventTimestamp = endValue - leadSeconds;
     if (startValue !== undefined && eventTimestamp <= startValue && endValue - startValue > minGapSeconds) {
@@ -326,6 +394,21 @@ function createRegionEndCueTimestamp(region, regionEndPreRollMs) {
         eventTimestamp = startValue;
     }
     return formatDerivedTimestamp(eventTimestamp);
+}
+function createRegionLayerPreRollTimestamp(region, markers, preRollMs) {
+    const candidateStarts = [
+        parseNumericTimestamp(region.start),
+        ...markers.map((marker) => parseNumericTimestamp(marker.start)),
+    ].filter((value) => value !== undefined);
+    if (candidateStarts.length === 0) {
+        return region.start;
+    }
+    const earliestStart = Math.min(...candidateStarts);
+    const leadSeconds = clampRegionLayerPreRollMs(preRollMs) / 1000;
+    return formatDerivedTimestamp(Math.max(0, earliestStart - leadSeconds));
+}
+function createRegionEndCueTimestamp(region, regionEndPreRollMs) {
+    return createRegionPreRollTimestamp(region.start, region.end, clampRegionEndPreRollMs(regionEndPreRollMs));
 }
 function parseNumericTimestamp(timestamp) {
     const trimmedTimestamp = timestamp.trim();

@@ -106,17 +106,21 @@ The page has one primary workflow:
 8. In hybrid mode, rows with `End` or `Length` define regions. Markers are attached to the most nested containing region.
 9. In hybrid mode, markers inside regions become cues in a region sequence named from the region ID and label, for example `R2 - Introduction - Sub Region`. Each region sequence also receives automatic `Region Start` and `Region End` cues at the region boundaries. `Region End` uses the configurable region-end pre-roll, defaulting to 750 ms before the actual region end so it can run before a same-time sequence Off; if a marker already sits in that final window, `Region End` is merged into the latest marker name instead of creating another cue. If a marker sits on the exact same timestamp as a boundary cue, the names are merged, for example `Region Start + Marker Name`. Region color creates the sequence appearance and marker color creates the cue appearance.
 10. A marker with a leading region target tag like `[R2]` is assigned to that region sequence even when it sits before the region start.
-11. A marker tagged `[LAYER=FX]` in hybrid mode is routed into a region-scoped layer sequence instead of the main region sequence. It uses the containing region or an explicit target like `[R2][LAYER=Voix]`, and a layer marker without any region target falls back to normal marker routing with a warning.
-12. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
-13. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
-14. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; the generator uses it to configure a timed `OffCue`, defaulting to 0.2 seconds when no release is found.
-15. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-16. Macro XML is always generated and included in the final ZIP archive.
-17. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
-18. The Summary step is review-only and sends the user to Extras before download.
-19. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
-20. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
-21. User settings are persisted in browser `localStorage` under `reaper2ma:settings:v1`; CSV contents, generated artifacts, timeline cursor state, and filters are not persisted.
+11. A marker tagged `[LAYER=FX]` in hybrid mode is routed into a region-scoped layer sequence instead of the main region sequence. It uses the containing region or an explicit target like `[R2][LAYER=Voix]`, and a layer marker without any region target falls back to normal marker routing with a warning. If the layer marker has no color and its target region has a readable color, the layer sequence, layer cues, `Layer Pre-Roll` cue, timeline track, and grandMA3 appearance use the region color lightened by 24%. Explicit marker colors still win and are not lightened.
+12. `[OFF_LAYER=FX]` and `[OFF_LAYERS]` create derived timecode `Off` events on region layer tracks. They use the containing region or an explicit target like `[R2][OFF_LAYER=Voix]`; missing regions or missing layer names produce warnings.
+13. The `Create layer pre-roll` setting is enabled by default and adds a `Layer Pre-Roll` cue/event at the beginning of each region layer sequence, before the first layer cue.
+14. The `Auto Off region layers` setting is enabled by default and emits one derived `Off` event on each layer track at the end of its parent region.
+15. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
+16. Markers with `Temp` or `Flash` execution tokens become bump overlays.
+17. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; the generator uses it to configure a timed `OffCue`, defaulting to 0.2 seconds when no release is found.
+18. In hybrid mode, an uncolored bump marker with a containing or explicitly targeted region inherits the readable region color lightened by 42%. That effective color is used for bump grouping, grandMA3 appearances, and timeline colors. Explicit bump marker colors still win and are not lightened.
+19. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+20. Macro XML is always generated and included in the final ZIP archive.
+21. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
+22. The Summary step is review-only and sends the user to Extras before download.
+23. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
+24. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
+25. User settings are persisted in browser `localStorage` under `reaper2ma:settings:v1`; CSV contents, generated artifacts, timeline cursor state, and filters are not persisted.
 
 The default settings are:
 
@@ -128,6 +132,9 @@ The default settings are:
 - `bumpPageSlotStart = 101`
 - `cueStartNumber = 1`
 - `regionEndPreRollMs = 750`
+- `autoOffRegionLayers = true`
+- `regionLayerPreRollEnabled = true`
+- `regionLayerPreRollMs = 750`
 - `speedMasterNumber = 4`, resolved in the UI to `speedMaster = "3.4"`
 - `prefix = "1"`, editable in the UI and used for repeated and bump sequence labels.
 - `importMode = "markers-only"`
@@ -177,14 +184,17 @@ Bracket tags are parsed from leading or trailing `[]` blocks:
 
 - Leading blocks can carry metadata like `BPM_129.5`, `CueFade_6/12`, `FadeFromX_0.5`, or `Temp`.
 - In hybrid mode, a leading region ID tag like `[R2]` explicitly routes the marker into that region sequence before falling back to position-based assignment.
-- In hybrid mode, `[LAYER=Name]` creates or reuses a layer sequence attached to the containing or explicitly targeted region. Layer cues are distinct per marker; their marker colors become cue appearances.
+- In hybrid mode, `[LAYER=Name]` creates or reuses a layer sequence attached to the containing or explicitly targeted region. Layer cues are distinct per marker; their marker colors become cue appearances. If a layer marker is uncolored and the target region has a readable color, the layer uses a 24% lightened version of the region color for the sequence appearance, uncolored layer cues, `Layer Pre-Roll`, and timeline track.
+- In hybrid mode, `[OFF_LAYER=Name]` emits a derived timecode `Off` event on that region layer track, and `[OFF_LAYERS]` emits one on every layer track for the containing or explicitly targeted region.
 - Trailing blocks can override the execution token, for example `Intro [Go+]`.
 - Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, `TempRelease`, `Flash`, and `FlashRelease`.
 - `Temp|Release_250` and `Flash|Release_120` create bump starts and set the generated sequence `OffCue` timing in milliseconds.
 - `TempRelease` and `FlashRelease` close the most recent unmatched bump start of the same kind to derive the generated sequence `OffCue` timing.
+- In hybrid mode, uncolored bump markers keep their region context even though they route to bump overlays. If the context region has a readable color, the bump uses a 42% lightened version of the region color for grouping, grandMA3 appearance, and timeline color.
 - Cue timing tags are emitted on the generated macro line as `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...`.
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
 - Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to cue 1 on the target region track. `OFF` maps to an `Off` event on the target region track without cue assignment. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.
+- Region layer action tags are separate from compact region actions. `[OFF_LAYER=FX]` and `[OFF_LAYERS]` do not change `OFF_Rx`; they create `Off` events only on matching layer tracks and never assign those events to a cue.
 
 ## Unique cue behavior
 
@@ -227,9 +237,10 @@ Macro commands for repeated sequences:
 - Creates each repeated sequence in the temporary DataPool with a local sequence number.
 - Stores cue ranges in that local sequence with `/Merge`.
 - Sets the OffCue trigger type to `Follow`.
-- Assigns a grandMA3 appearance per distinct Reaper color.
+- Assigns a grandMA3 appearance per distinct readable Reaper color.
 - Applies `CueFade` and cue timing tags to the created cues when present.
 - Region sequences use the same appearance flow when the region row has a color, and region cues can get their own cue-level appearance when the marker color differs from the region color.
+- Region layers and bumps can also create dedicated appearances from inherited region colors. These derived colors are real `#RRGGBB` colors, get their own appearance IDs, and are distinct from the parent region appearance.
 - Appearance color conversion supports decimal Reaper color values, `0x...`, `#RRGGBB`, and six-digit hex values that contain A-F characters such as `F2FF00`.
 
 Timecode commands for repeated sequences:
@@ -271,12 +282,12 @@ Macro specifics:
 - Every created sequence gets the configured Speed Master assignment.
 - If the base sequence has no unique cues, base-sequence macro lines are skipped to avoid `Cue 1 thru 0`.
 - In hybrid mode, region sequences are stored like regular sequences. They receive `Region Start` and `Region End` cues at the Reaper region boundaries, and their marker cues get labeled, timed, and optionally assigned appearances. `Region End` timecode events use the configured pre-roll, defaulting to 750 ms before the region end when there is no marker in that final window. Boundary cues merge into matching markers instead of creating duplicate cues, for example `Region End + Marker Name`.
-- Region layer sequences are stored immediately after their parent region sequence, named like `R2 - Chorus - FX`, assigned to normal page executors, and receive one cue per layer marker with optional cue appearance, `CueFade`, and cue timing modifiers.
+- Region layer sequences are stored immediately after their parent region sequence, named like `R2 - Chorus - FX`, assigned to normal page executors, and receive one cue per layer marker with optional cue appearance, `CueFade`, and cue timing modifiers. When enabled, each layer sequence starts with a `Layer Pre-Roll` cue/event before the first layer cue. Uncolored layer markers in readable colored regions inherit the 24% lightened region appearance; explicit marker colors override it. Manual and automatic Off behavior is emitted as derived timecode events on the layer tracks, not as extra layer cues.
 - Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} COLOR="1,1,1,0" BackR={0..255} BackG={0..255} BackB={0..255} BackAlpha=221`, then `Set DataPool "{temp}" Sequence {local} APPEARANCE="{name}"`.
 - Cue-level appearances use `Set DataPool "{temp}" Sequence {local} Cue {cueNumber} APPEARANCE="{name}"`.
 - BPM markers create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Temp`; a timed `OffCue` handles the 0.5 second release.
 - Main, region, region layer, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}`.
-- Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}`, defaulting to the 100 executor row for button-style Temp/Flash playbacks.
+- Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}`, defaulting to the 100 executor row for button-style Temp/Flash playbacks. Uncolored bump markers in readable colored regions inherit the 42% lightened region color for grouping, sequence/cue appearance, and timeline preview.
 - grandMA3 executor rows are documented as 101-190 for button-only executors, 201-290 for button+fader executors, and 301-490 for button+knob executor rows. Hardware surfaces can expose fewer executor columns than the software range.
 - The macro finalizes with `Move DataPool "{temp}" Sequence 1 Thru At Sequence {firstFinalSequenceNumber}`, optional timecode move, and `Delete DataPool "{temp}" /NoConfirm`.
 
@@ -287,6 +298,8 @@ Command-driven timecode specifics:
 - Cue-to-event connections use `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.1.{track}.1.1.{event}`.
 - `OFF_Rx` creates an `Off` event on the target region track without cue assignment.
 - `ON_Rx` creates a `Goto|Go+` event on the target region track assigned to cue 1.
+- `[OFF_LAYER=Name]` creates an `Off` event on the matching region layer track without cue assignment. `[OFF_LAYERS]` creates one `Off` event per layer track for that region.
+- Automatic layer Off events are enabled by default at the parent region end and are sorted after same-time cue triggers so the Off wins at the region boundary.
 - Event timestamps stay in the CSV's seconds string format. Duration is still calculated from the latest generated timestamp plus one second.
 - The generator does not emit an audio track, fader subtracks, `RealtimeCmd`, `CueDestination`, `ValCueDestination`, or grandMA internal object/cue numeric IDs.
 
@@ -318,11 +331,11 @@ The UI is a single page with:
 - Settings grid for sequence number, editable prefix, import/export mode selects, timecode number, page number, page slot start, and numeric Speed Master suffix.
 - Import mode helper comparing `Markers only` and `Regions + markers`, including examples of flat marker cues versus region rows becoming generated sequences.
 - Separate live executor preview showing main, region, region layer, and repeated sequence assignments from `Page {pageNumber}.{pageSlotStart}` plus bump assignments from `Page {pageNumber}.{bumpPageSlotStart}`. BPM helper sequences are intentionally omitted from this executor preview.
-- Collapsible advanced section for cue start number.
+- Collapsible advanced section for cue start number, region-end pre-roll, layer pre-roll, and automatic region layer Off.
 - Radio group for import mode and export mode.
 - Marker syntax help opened from the import step.
 - Converter settings are restored from browser local storage on page load and automatically saved when changed.
-- Advanced settings include a persisted `Region End pre-roll` field in milliseconds, defaulting to 750.
+- Advanced settings include persisted `Region End pre-roll`, `Create layer pre-roll`, `Layer pre-roll`, and `Auto Off region layers` controls. Both pre-rolls default to 750 ms, and automatic layer Off is enabled by default.
 - Summary sheet with dense sequence, executor, cue, appearance, and timecode columns.
 - Footer with upstream source link and copyright.
 

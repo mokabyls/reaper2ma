@@ -36,8 +36,9 @@ function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings
     const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(normalizedMarkers);
     const repeatedSequences = groupRepeatedSequences(repeatedMarkers, settings.prefix, settings.sequenceNumber, appearanceRegistry.nextAppearanceNumber(), appearanceRegistry.resolveAppearance);
     const repeatedSequenceNamesByColor = new Map(repeatedSequences.map((sequence) => [sequence.color, sequence.displayName]));
-    const bumpSequences = groupBumpSequences(bumpMarkers, settings.sequenceNumber + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor);
+    const bumpSequences = groupBumpSequences(bumpMarkers, settings.sequenceNumber + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor, appearanceRegistry.resolveAppearance);
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
+    const regionLayerWarnings = collectRegionLayerWarnings(normalizedMarkers, []);
     const bpmMarkers = normalizedMarkers.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
     const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], [], repeatedSequences, bumpSequences, bpmSequence);
@@ -45,7 +46,7 @@ function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
-        validationWarnings: [...validationWarnings, ...bumpReleaseWarnings],
+        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...bumpReleaseWarnings],
         regionSequences: prefixed.regionSequences,
         regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,
@@ -59,13 +60,13 @@ function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, s
     const regions = parseRegions(regionRows);
     const markersWithRegions = assignMarkersToRegions(normalizedMarkers, regions);
     const outsideRegionMarkers = markersWithRegions.filter((marker) => !marker.regionId);
-    const { regionSequences, regionLayerSequences, nextSequenceNumber: nextSequenceAfterRegionsAndLayers, } = buildRegionSequences(markersWithRegions, regions, settings.sequenceNumber, appearanceRegistry.resolveAppearance, settings.regionEndPreRollMs);
+    const { regionSequences, regionLayerSequences, nextSequenceNumber: nextSequenceAfterRegionsAndLayers, } = buildRegionSequences(markersWithRegions, regions, settings.sequenceNumber, appearanceRegistry.resolveAppearance, settings.regionEndPreRollMs, settings.regionLayerPreRollEnabled, settings.regionLayerPreRollMs);
     const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(outsideRegionMarkers);
     const repeatedSequences = groupRepeatedSequences(repeatedMarkers, settings.prefix, nextSequenceAfterRegionsAndLayers, appearanceRegistry.nextAppearanceNumber(), appearanceRegistry.resolveAppearance);
     const repeatedSequenceNamesByColor = new Map(repeatedSequences.map((sequence) => [sequence.color, sequence.displayName]));
-    const bumpSequences = groupBumpSequences(bumpMarkers, nextSequenceAfterRegionsAndLayers + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor);
+    const bumpSequences = groupBumpSequences(bumpMarkers, nextSequenceAfterRegionsAndLayers + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor, appearanceRegistry.resolveAppearance);
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
-    const regionLayerWarnings = collectRegionLayerWarnings(markersWithRegions);
+    const regionLayerWarnings = collectRegionLayerWarnings(markersWithRegions, regionLayerSequences);
     const bpmMarkers = markersWithRegions.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, regionSequences.length + regionLayerSequences.length + repeatedSequences.length + bumpSequences.length);
     const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
@@ -86,10 +87,37 @@ function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, s
 function collectBumpReleaseWarnings(bumpSequences) {
     return bumpSequences.flatMap((sequence) => sequence.releaseWarnings ?? []);
 }
-function collectRegionLayerWarnings(markers) {
-    return markers
-        .filter((marker) => marker.regionLayerName && !marker.regionId)
-        .map((marker) => `Layer marker "${marker.displayName || "Cue"}" uses [LAYER=${marker.regionLayerName}] without a target region. It is handled as a normal marker.`);
+function collectRegionLayerWarnings(markers, regionLayerSequences) {
+    const warnings = [];
+    const layerNamesByRegionId = new Map();
+    for (const sequence of regionLayerSequences) {
+        const layerNames = layerNamesByRegionId.get(sequence.regionId) ?? new Set();
+        layerNames.add(sequence.layerName);
+        layerNamesByRegionId.set(sequence.regionId, layerNames);
+    }
+    for (const marker of markers) {
+        if (marker.regionLayerName && !marker.regionId) {
+            warnings.push(`Layer marker "${marker.displayName || "Cue"}" uses [LAYER=${marker.regionLayerName}] without a target region. It is handled as a normal marker.`);
+        }
+        for (const action of marker.regionLayerActions ?? []) {
+            const actionTag = formatRegionLayerActionTag(action);
+            if (!action.regionId) {
+                warnings.push(`Layer off marker "${marker.displayName || "Cue"}" uses ${actionTag} without a target region. No layer Off event will be generated.`);
+                continue;
+            }
+            const layerNames = layerNamesByRegionId.get(action.regionId) ?? new Set();
+            if (action.scope === "layer" && !layerNames.has(action.layerName)) {
+                warnings.push(`Layer off marker "${marker.displayName || "Cue"}" targets ${actionTag} for ${action.regionId}, but that layer sequence does not exist.`);
+            }
+            if (action.scope === "all" && layerNames.size === 0) {
+                warnings.push(`Layer off marker "${marker.displayName || "Cue"}" targets [OFF_LAYERS] for ${action.regionId}, but that region has no layer sequences.`);
+            }
+        }
+    }
+    return warnings;
+}
+function formatRegionLayerActionTag(action) {
+    return action.scope === "layer" ? `[OFF_LAYER=${action.layerName}]` : "[OFF_LAYERS]";
 }
 function prefixGeneratedSequences(sequenceNamePrefix, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence) {
     const prefix = sequenceNamePrefix.trim();
@@ -140,7 +168,10 @@ function createAppearanceRegistry(startNumber) {
             if (existing) {
                 return existing;
             }
-            const appearanceColor = convertReaperColorToGrandmaAppearanceColor(trimmedColor) ?? "";
+            const appearanceColor = convertReaperColorToGrandmaAppearanceColor(trimmedColor);
+            if (!appearanceColor) {
+                return undefined;
+            }
             const appearanceReference = {
                 appearanceName: createAppearanceNameFromReaperColor(trimmedColor),
                 appearanceNumber: nextAppearanceNumber++,

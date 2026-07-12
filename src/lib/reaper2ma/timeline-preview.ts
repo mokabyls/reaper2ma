@@ -2,7 +2,7 @@ import { convertReaperColorToCssColor } from "./colors.js";
 import { createUniqueCuePlan } from "./cue-plan.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
 import { collectTimecodeTimestamps } from "./timecode-duration.js";
-import type { ConversionArtifacts, ConversionSettings, RegionActionTag, RegionLayerSequence, SequenceTrigger } from "./types.js";
+import type { ConversionArtifacts, ConversionSettings, RegionActionTag, RegionLayerActionTag, RegionLayerSequence, SequenceTrigger } from "./types.js";
 
 export type TimelineTrackKind = "main" | "region" | "layer" | "repeated" | "bump" | "bpm";
 
@@ -53,11 +53,18 @@ type InternalTimelineEvent = TimelinePreviewEvent & {
     priority: number;
     sourceOrder: number;
     regionActions?: RegionActionTag[];
+    regionLayerActions?: RegionLayerActionTag[];
 };
 
 type InternalTimelineTrack = Omit<TimelinePreviewTrack, "events"> & {
     events: InternalTimelineEvent[];
     regionId?: string;
+    regionLayer?: {
+        regionId: string;
+        layerName: string;
+        start: string;
+        end: string;
+    };
 };
 
 const FALLBACK_DURATION_SECONDS = 1;
@@ -86,14 +93,17 @@ export function createTimelinePreview(artifacts: ConversionArtifacts, settings: 
     }
 
     const tracks = createTimelineTracks(artifacts, settings);
-    const timestamps = collectTimecodeTimestamps(
-        artifacts.uniqueCues,
-        artifacts.regionSequences,
-        artifacts.regionLayerSequences,
-        artifacts.repeatedSequences,
-        artifacts.bumpSequences,
-        artifacts.bpmSequence,
-    );
+    const timestamps = [
+        ...collectTimecodeTimestamps(
+            artifacts.uniqueCues,
+            artifacts.regionSequences,
+            artifacts.regionLayerSequences,
+            artifacts.repeatedSequences,
+            artifacts.bumpSequences,
+            artifacts.bpmSequence,
+        ),
+        ...tracks.flatMap((track) => track.events.map((event) => event.timestamp)),
+    ];
     const durationSeconds = calculatePreviewDurationSeconds(timestamps);
     const ticks = createTimelineTicks(durationSeconds);
 
@@ -113,9 +123,9 @@ export function createTimelinePreview(artifacts: ConversionArtifacts, settings: 
         enabled: true,
         duration: durationSeconds.toFixed(3),
         durationSeconds,
-        tracks: tracks.map(({ regionId, ...track }) => ({
+        tracks: tracks.map(({ regionId, regionLayer, ...track }) => ({
             ...track,
-            events: track.events.map(({ priority, sourceOrder, regionActions, ...event }) => event),
+            events: track.events.map(({ priority, sourceOrder, regionActions, regionLayerActions, ...event }) => event),
         })),
         ticks,
         eventCount: tracks.reduce((total, track) => total + track.events.length, 0),
@@ -126,6 +136,8 @@ export function createTimelinePreview(artifacts: ConversionArtifacts, settings: 
 function createTimelineTracks(artifacts: ConversionArtifacts, settings: ConversionSettings): InternalTimelineTrack[] {
     const tracks: InternalTimelineTrack[] = [];
     const regionTracksById = new Map<string, InternalTimelineTrack>();
+    const layerTracksByKey = new Map<string, InternalTimelineTrack>();
+    const layerTracksByRegionId = new Map<string, InternalTimelineTrack[]>();
     const layerSequencesByRegionId = new Map<string, RegionLayerSequence[]>();
 
     for (const sequence of artifacts.regionSequences) {
@@ -149,7 +161,14 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
 
         tracks.push(createdTrack);
 
-        if (createdTrack.regionId) {
+        if (createdTrack.regionLayer) {
+            const layerKey = createRegionLayerKey(createdTrack.regionLayer.regionId, createdTrack.regionLayer.layerName);
+            layerTracksByKey.set(layerKey, createdTrack);
+            layerTracksByRegionId.set(createdTrack.regionLayer.regionId, [
+                ...(layerTracksByRegionId.get(createdTrack.regionLayer.regionId) ?? []),
+                createdTrack,
+            ]);
+        } else if (createdTrack.regionId) {
             regionTracksById.set(createdTrack.regionId, createdTrack);
         }
 
@@ -174,6 +193,7 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
                     cueNumber: settings.cueStartNumber + index,
                     cueName: cue.cueName,
                     ...(cue.regionActions?.length ? { regionActions: cue.regionActions } : {}),
+                    ...(cue.regionLayerActions?.length ? { regionLayerActions: cue.regionLayerActions } : {}),
                 },
                 false,
                 1,
@@ -201,6 +221,12 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
                 sequenceNumber: layerSequence.sequenceNumber,
                 displayName: layerSequence.displayName,
                 color: resolveTrackColor("layer", layerSequence.color),
+                regionLayer: {
+                    regionId: layerSequence.regionId,
+                    layerName: layerSequence.layerName,
+                    start: layerSequence.start,
+                    end: layerSequence.end,
+                },
             });
 
             for (const event of layerSequence.events) {
@@ -260,27 +286,59 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
         });
     }
 
-    for (const track of tracks) {
-        for (const event of [...track.events]) {
-            for (const action of sortRegionActions(event.regionActions ?? [])) {
-                const targetTrack = regionTracksById.get(action.regionId);
+    const sourceEvents = tracks.flatMap((track) => [...track.events]);
 
-                if (!targetTrack) {
-                    continue;
-                }
+    for (const event of sourceEvents) {
+        for (const action of sortRegionActions(event.regionActions ?? [])) {
+            const targetTrack = regionTracksById.get(action.regionId);
 
-                const token = action.kind === "ON" ? "Go+" : "Off";
+            if (!targetTrack) {
+                continue;
+            }
 
+            const token = action.kind === "ON" ? "Go+" : "Off";
+
+            addTimelineEvent(targetTrack, {
+                timestamp: event.timestamp,
+                token,
+                ...(action.kind === "ON" ? { cueNumber: 1, cueName: "Cue 1" } : {}),
+                label: `${action.kind} ${action.regionId}`,
+                isDerived: true,
+                priority: action.kind === "OFF" ? 0 : 2,
+                sourceOrder: sourceOrder++,
+            });
+        }
+
+        for (const action of event.regionLayerActions ?? []) {
+            const targetTracks = resolveRegionLayerActionTracks(action, layerTracksByKey, layerTracksByRegionId);
+
+            for (const targetTrack of targetTracks) {
                 addTimelineEvent(targetTrack, {
                     timestamp: event.timestamp,
-                    token,
-                    ...(action.kind === "ON" ? { cueNumber: 1, cueName: "Cue 1" } : {}),
-                    label: `${action.kind} ${action.regionId}`,
+                    token: "Off",
+                    label: `Off Layer ${targetTrack.regionLayer?.layerName ?? ""}`.trim(),
                     isDerived: true,
-                    priority: action.kind === "OFF" ? 0 : 2,
+                    priority: 0,
                     sourceOrder: sourceOrder++,
                 });
             }
+        }
+    }
+
+    if (settings.autoOffRegionLayers !== false) {
+        for (const track of tracks) {
+            if (!track.regionLayer) {
+                continue;
+            }
+
+            addTimelineEvent(track, {
+                timestamp: track.regionLayer.end,
+                token: "Off",
+                label: `Auto Off ${track.regionLayer.layerName}`,
+                isDerived: true,
+                priority: 3,
+                sourceOrder: sourceOrder++,
+            });
         }
     }
 
@@ -304,6 +362,7 @@ function addSequenceTriggerEvent(
         priority,
         sourceOrder,
         ...(event.regionActions?.length ? { regionActions: event.regionActions } : {}),
+        ...(event.regionLayerActions?.length ? { regionLayerActions: event.regionLayerActions } : {}),
     });
 }
 
@@ -319,6 +378,7 @@ function addTimelineEvent(
         cueNumber?: number;
         cueName?: string;
         regionActions?: RegionActionTag[];
+        regionLayerActions?: RegionLayerActionTag[];
     },
 ): void {
     track.events.push({
@@ -335,6 +395,7 @@ function addTimelineEvent(
         ...(event.cueNumber !== undefined ? { cueNumber: event.cueNumber } : {}),
         ...(event.cueName !== undefined ? { cueName: event.cueName } : {}),
         ...(event.regionActions?.length ? { regionActions: event.regionActions } : {}),
+        ...(event.regionLayerActions?.length ? { regionLayerActions: event.regionLayerActions } : {}),
     });
 }
 
@@ -440,6 +501,28 @@ function formatTimelineTime(timestamp: string): string {
 
 function sortRegionActions(actions: RegionActionTag[]): RegionActionTag[] {
     return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));
+}
+
+function resolveRegionLayerActionTracks(
+    action: RegionLayerActionTag,
+    layerTracksByKey: Map<string, InternalTimelineTrack>,
+    layerTracksByRegionId: Map<string, InternalTimelineTrack[]>,
+): InternalTimelineTrack[] {
+    if (!action.regionId) {
+        return [];
+    }
+
+    if (action.scope === "all") {
+        return layerTracksByRegionId.get(action.regionId) ?? [];
+    }
+
+    const track = layerTracksByKey.get(createRegionLayerKey(action.regionId, action.layerName));
+
+    return track ? [track] : [];
+}
+
+function createRegionLayerKey(regionId: string, layerName: string): string {
+    return `${regionId}\u0000${layerName}`;
 }
 
 function compareTimelineEvents(left: InternalTimelineEvent, right: InternalTimelineEvent): number {

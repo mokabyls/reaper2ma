@@ -1,4 +1,4 @@
-import { createAppearanceNameFromReaperColor } from "./colors.js";
+import { createAppearanceNameFromReaperColor, createInheritedRegionBumpColor } from "./colors.js";
 const START_CUE_NAME = "Start";
 const DEFAULT_BUMP_RELEASE_DURATION_SECONDS = "0.2";
 const DEFAULT_BPM_RELEASE_DURATION_SECONDS = "0.5";
@@ -31,6 +31,11 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber, 
                         regionActions: marker.regionActions,
                     }
                     : {}),
+                ...(marker.regionLayerActions?.length
+                    ? {
+                        regionLayerActions: marker.regionLayerActions,
+                    }
+                    : {}),
                 ...(marker.cueFade !== undefined
                     ? {
                         cueFade: marker.cueFade,
@@ -44,6 +49,15 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber, 
             });
             continue;
         }
+        const appearanceReference = resolveAppearance?.(marker.color);
+        const fallbackAppearanceReference = resolveAppearance === undefined
+            ? {
+                appearanceName: createAppearanceNameFromReaperColor(marker.color),
+                appearanceNumber: nextAppearanceNumber++,
+                appearanceColor: marker.color,
+            }
+            : undefined;
+        const sequenceAppearanceReference = appearanceReference ?? fallbackAppearanceReference;
         const repeatedSequence = {
             color: marker.color,
             displayName: createUniqueSequenceName(`${prefix} - ${marker.displayName}`, usedSequenceNames),
@@ -74,6 +88,11 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber, 
                             regionActions: marker.regionActions,
                         }
                         : {}),
+                    ...(marker.regionLayerActions?.length
+                        ? {
+                            regionLayerActions: marker.regionLayerActions,
+                        }
+                        : {}),
                     ...(marker.cueFade !== undefined
                         ? {
                             cueFade: marker.cueFade,
@@ -86,17 +105,15 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber, 
                         : {}),
                 },
             ],
-            appearanceName: createAppearanceNameFromReaperColor(marker.color),
-            appearanceNumber: nextAppearanceNumber++,
-            appearanceColor: marker.color,
+            ...(sequenceAppearanceReference
+                ? {
+                    appearanceName: sequenceAppearanceReference.appearanceName,
+                    appearanceNumber: sequenceAppearanceReference.appearanceNumber,
+                    appearanceColor: sequenceAppearanceReference.appearanceColor,
+                }
+                : {}),
             sequenceNumber: nextSequenceNumber++,
         };
-        const appearanceReference = resolveAppearance?.(marker.color);
-        if (appearanceReference) {
-            repeatedSequence.appearanceName = appearanceReference.appearanceName;
-            repeatedSequence.appearanceNumber = appearanceReference.appearanceNumber;
-            repeatedSequence.appearanceColor = appearanceReference.appearanceColor;
-        }
         existing = {
             sequence: repeatedSequence,
             cueNumbersByName: new Map([
@@ -109,7 +126,7 @@ export function groupRepeatedSequences(repeatedMarkers, prefix, sequenceNumber, 
     }
     return repeatedSequences;
 }
-export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequenceNamesByColor) {
+export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequenceNamesByColor, resolveAppearance) {
     const bumpSequences = [];
     const sequencesByKey = new Map();
     const openStartsByColorAndKind = new Map();
@@ -118,11 +135,12 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
     let nextSequenceNumber = sequenceNumber + 1;
     for (const marker of bumpMarkers) {
         const bumpAction = marker.bumpAction ?? inferBumpActionFromExecToken(marker.execToken);
+        const effectiveColor = resolveBumpMarkerColor(marker);
         if (!bumpAction) {
             continue;
         }
         if (bumpAction.phase === "release") {
-            const openStarts = openStartsByColorAndKind.get(createBumpStackKey(marker.color, bumpAction.kind));
+            const openStarts = openStartsByColorAndKind.get(createBumpStackKey(effectiveColor, bumpAction.kind));
             const openStart = openStarts?.pop();
             if (!openStart) {
                 continue;
@@ -133,17 +151,25 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
             }
             continue;
         }
-        const sequenceKey = `${marker.color}::${marker.displayName}`;
+        const sequenceKey = `${effectiveColor}::${marker.displayName}`;
         let existing = sequencesByKey.get(sequenceKey);
         if (!existing) {
-            const baseSequenceName = baseSequenceNamesByColor.get(marker.color) ?? prefix;
+            const baseSequenceName = baseSequenceNamesByColor.get(effectiveColor) ?? prefix;
+            const appearanceReference = effectiveColor ? resolveAppearance?.(effectiveColor) : undefined;
             const bumpSequence = {
-                color: marker.color,
+                color: effectiveColor,
                 displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
                 cues: [
                     {
                         cueNumber: 1,
                         name: START_CUE_NAME,
+                        ...(appearanceReference
+                            ? {
+                                appearanceName: appearanceReference.appearanceName,
+                                appearanceNumber: appearanceReference.appearanceNumber,
+                                appearanceColor: appearanceReference.appearanceColor,
+                            }
+                            : {}),
                         ...(marker.cueFade !== undefined
                             ? {
                                 cueFade: marker.cueFade,
@@ -158,6 +184,13 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
                 ],
                 events: [],
                 releaseDurationSeconds: DEFAULT_BUMP_RELEASE_DURATION_SECONDS,
+                ...(appearanceReference
+                    ? {
+                        appearanceName: appearanceReference.appearanceName,
+                        appearanceNumber: appearanceReference.appearanceNumber,
+                        appearanceColor: appearanceReference.appearanceColor,
+                    }
+                    : {}),
                 sequenceNumber: nextSequenceNumber++,
             };
             existing = {
@@ -173,7 +206,7 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
             applyExplicitBumpReleaseDuration(existing.sequence, formatDurationSeconds(bumpAction.releaseDelayMs / 1000), explicitReleaseDurationsBySequence);
             continue;
         }
-        const stackKey = createBumpStackKey(marker.color, bumpAction.kind);
+        const stackKey = createBumpStackKey(effectiveColor, bumpAction.kind);
         const openStarts = openStartsByColorAndKind.get(stackKey) ?? [];
         openStarts.push({
             sequence: existing.sequence,
@@ -256,6 +289,12 @@ function isBumpReleaseExecutionToken(execToken) {
         .map((part) => part.trim().toLowerCase())
         .some((part) => part === "temprelease" || part === "flashrelease");
 }
+function resolveBumpMarkerColor(marker) {
+    if (marker.color.trim()) {
+        return marker.color;
+    }
+    return marker.regionContextColor ? (createInheritedRegionBumpColor(marker.regionContextColor) ?? "") : "";
+}
 function createBumpStackKey(color, kind) {
     return `${color}::${kind}`;
 }
@@ -268,6 +307,11 @@ function pushBumpStartEvent(sequence, marker, kind) {
         ...(marker.regionActions?.length
             ? {
                 regionActions: marker.regionActions,
+            }
+            : {}),
+        ...(marker.regionLayerActions?.length
+            ? {
+                regionLayerActions: marker.regionLayerActions,
             }
             : {}),
         ...(marker.cueFade !== undefined

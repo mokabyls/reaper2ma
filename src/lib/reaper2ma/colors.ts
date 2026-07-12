@@ -1,6 +1,8 @@
 const REAPER_COLOR_MASK = 0xFFFFFF;
 const GRANDMA_APPEARANCE_COLOR = "1,1,1,0";
 const GRANDMA_APPEARANCE_BACK_ALPHA = 221;
+const REGION_LAYER_INHERITED_LIGHTEN_AMOUNT = 0.24;
+const REGION_BUMP_INHERITED_LIGHTEN_AMOUNT = 0.42;
 
 function parseReaperColorValue(color: string): number | undefined {
     const trimmedColor = color.trim();
@@ -64,6 +66,39 @@ export function convertReaperColorToCssColor(color: string): string | undefined 
     return `rgb(${rgb.red}, ${rgb.green}, ${rgb.blue})`;
 }
 
+export function createInheritedRegionLayerColor(regionColor: string): string | undefined {
+    return createLightenedReaperColor(regionColor, REGION_LAYER_INHERITED_LIGHTEN_AMOUNT);
+}
+
+export function createInheritedRegionBumpColor(regionColor: string): string | undefined {
+    return createLightenedReaperColor(regionColor, REGION_BUMP_INHERITED_LIGHTEN_AMOUNT);
+}
+
 export function createAppearanceNameFromReaperColor(color: string): string {
     return `R2MA Color ${color.trim()}`;
+}
+
+function createLightenedReaperColor(color: string, amount: number): string | undefined {
+    const rgb = convertReaperColorToRgb(color);
+
+    if (!rgb) {
+        return undefined;
+    }
+
+    return [
+        "#",
+        formatColorChannel(lightenColorChannel(rgb.red, amount)),
+        formatColorChannel(lightenColorChannel(rgb.green, amount)),
+        formatColorChannel(lightenColorChannel(rgb.blue, amount)),
+    ].join("");
+}
+
+function lightenColorChannel(channel: number, amount: number): number {
+    const normalizedAmount = Math.min(1, Math.max(0, amount));
+
+    return Math.round(channel + (255 - channel) * normalizedAmount);
+}
+
+function formatColorChannel(channel: number): string {
+    return channel.toString(16).padStart(2, "0").toUpperCase();
 }

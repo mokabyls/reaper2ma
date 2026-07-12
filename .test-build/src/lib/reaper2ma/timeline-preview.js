@@ -24,7 +24,10 @@ export function createTimelinePreview(artifacts, settings) {
         return createEmptyTimelinePreview("Cues only mode does not create grandMA3 timecode tracks.");
     }
     const tracks = createTimelineTracks(artifacts, settings);
-    const timestamps = collectTimecodeTimestamps(artifacts.uniqueCues, artifacts.regionSequences, artifacts.regionLayerSequences, artifacts.repeatedSequences, artifacts.bumpSequences, artifacts.bpmSequence);
+    const timestamps = [
+        ...collectTimecodeTimestamps(artifacts.uniqueCues, artifacts.regionSequences, artifacts.regionLayerSequences, artifacts.repeatedSequences, artifacts.bumpSequences, artifacts.bpmSequence),
+        ...tracks.flatMap((track) => track.events.map((event) => event.timestamp)),
+    ];
     const durationSeconds = calculatePreviewDurationSeconds(timestamps);
     const ticks = createTimelineTicks(durationSeconds);
     for (const track of tracks) {
@@ -41,9 +44,9 @@ export function createTimelinePreview(artifacts, settings) {
         enabled: true,
         duration: durationSeconds.toFixed(3),
         durationSeconds,
-        tracks: tracks.map(({ regionId, ...track }) => ({
+        tracks: tracks.map(({ regionId, regionLayer, ...track }) => ({
             ...track,
-            events: track.events.map(({ priority, sourceOrder, regionActions, ...event }) => event),
+            events: track.events.map(({ priority, sourceOrder, regionActions, regionLayerActions, ...event }) => event),
         })),
         ticks,
         eventCount: tracks.reduce((total, track) => total + track.events.length, 0),
@@ -53,6 +56,8 @@ export function createTimelinePreview(artifacts, settings) {
 function createTimelineTracks(artifacts, settings) {
     const tracks = [];
     const regionTracksById = new Map();
+    const layerTracksByKey = new Map();
+    const layerTracksByRegionId = new Map();
     const layerSequencesByRegionId = new Map();
     for (const sequence of artifacts.regionSequences) {
         layerSequencesByRegionId.set(sequence.regionId, artifacts.regionLayerSequences.filter((layerSequence) => layerSequence.regionId === sequence.regionId));
@@ -69,7 +74,15 @@ function createTimelineTracks(artifacts, settings) {
             ...track,
         };
         tracks.push(createdTrack);
-        if (createdTrack.regionId) {
+        if (createdTrack.regionLayer) {
+            const layerKey = createRegionLayerKey(createdTrack.regionLayer.regionId, createdTrack.regionLayer.layerName);
+            layerTracksByKey.set(layerKey, createdTrack);
+            layerTracksByRegionId.set(createdTrack.regionLayer.regionId, [
+                ...(layerTracksByRegionId.get(createdTrack.regionLayer.regionId) ?? []),
+                createdTrack,
+            ]);
+        }
+        else if (createdTrack.regionId) {
             regionTracksById.set(createdTrack.regionId, createdTrack);
         }
         return createdTrack;
@@ -89,6 +102,7 @@ function createTimelineTracks(artifacts, settings) {
                 cueNumber: settings.cueStartNumber + index,
                 cueName: cue.cueName,
                 ...(cue.regionActions?.length ? { regionActions: cue.regionActions } : {}),
+                ...(cue.regionLayerActions?.length ? { regionLayerActions: cue.regionLayerActions } : {}),
             }, false, 1, sourceOrder++);
         });
     }
@@ -109,6 +123,12 @@ function createTimelineTracks(artifacts, settings) {
                 sequenceNumber: layerSequence.sequenceNumber,
                 displayName: layerSequence.displayName,
                 color: resolveTrackColor("layer", layerSequence.color),
+                regionLayer: {
+                    regionId: layerSequence.regionId,
+                    layerName: layerSequence.layerName,
+                    start: layerSequence.start,
+                    end: layerSequence.end,
+                },
             });
             for (const event of layerSequence.events) {
                 addSequenceTriggerEvent(layerTrack, event, false, 1, sourceOrder++);
@@ -159,24 +179,51 @@ function createTimelineTracks(artifacts, settings) {
             });
         });
     }
-    for (const track of tracks) {
-        for (const event of [...track.events]) {
-            for (const action of sortRegionActions(event.regionActions ?? [])) {
-                const targetTrack = regionTracksById.get(action.regionId);
-                if (!targetTrack) {
-                    continue;
-                }
-                const token = action.kind === "ON" ? "Go+" : "Off";
+    const sourceEvents = tracks.flatMap((track) => [...track.events]);
+    for (const event of sourceEvents) {
+        for (const action of sortRegionActions(event.regionActions ?? [])) {
+            const targetTrack = regionTracksById.get(action.regionId);
+            if (!targetTrack) {
+                continue;
+            }
+            const token = action.kind === "ON" ? "Go+" : "Off";
+            addTimelineEvent(targetTrack, {
+                timestamp: event.timestamp,
+                token,
+                ...(action.kind === "ON" ? { cueNumber: 1, cueName: "Cue 1" } : {}),
+                label: `${action.kind} ${action.regionId}`,
+                isDerived: true,
+                priority: action.kind === "OFF" ? 0 : 2,
+                sourceOrder: sourceOrder++,
+            });
+        }
+        for (const action of event.regionLayerActions ?? []) {
+            const targetTracks = resolveRegionLayerActionTracks(action, layerTracksByKey, layerTracksByRegionId);
+            for (const targetTrack of targetTracks) {
                 addTimelineEvent(targetTrack, {
                     timestamp: event.timestamp,
-                    token,
-                    ...(action.kind === "ON" ? { cueNumber: 1, cueName: "Cue 1" } : {}),
-                    label: `${action.kind} ${action.regionId}`,
+                    token: "Off",
+                    label: `Off Layer ${targetTrack.regionLayer?.layerName ?? ""}`.trim(),
                     isDerived: true,
-                    priority: action.kind === "OFF" ? 0 : 2,
+                    priority: 0,
                     sourceOrder: sourceOrder++,
                 });
             }
+        }
+    }
+    if (settings.autoOffRegionLayers !== false) {
+        for (const track of tracks) {
+            if (!track.regionLayer) {
+                continue;
+            }
+            addTimelineEvent(track, {
+                timestamp: track.regionLayer.end,
+                token: "Off",
+                label: `Auto Off ${track.regionLayer.layerName}`,
+                isDerived: true,
+                priority: 3,
+                sourceOrder: sourceOrder++,
+            });
         }
     }
     return tracks;
@@ -192,6 +239,7 @@ function addSequenceTriggerEvent(track, event, isDerived, priority, sourceOrder)
         priority,
         sourceOrder,
         ...(event.regionActions?.length ? { regionActions: event.regionActions } : {}),
+        ...(event.regionLayerActions?.length ? { regionLayerActions: event.regionLayerActions } : {}),
     });
 }
 function addTimelineEvent(track, event) {
@@ -209,6 +257,7 @@ function addTimelineEvent(track, event) {
         ...(event.cueNumber !== undefined ? { cueNumber: event.cueNumber } : {}),
         ...(event.cueName !== undefined ? { cueName: event.cueName } : {}),
         ...(event.regionActions?.length ? { regionActions: event.regionActions } : {}),
+        ...(event.regionLayerActions?.length ? { regionLayerActions: event.regionLayerActions } : {}),
     });
 }
 function createEmptyTimelinePreview(emptyMessage) {
@@ -292,6 +341,19 @@ function formatTimelineTime(timestamp) {
 }
 function sortRegionActions(actions) {
     return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));
+}
+function resolveRegionLayerActionTracks(action, layerTracksByKey, layerTracksByRegionId) {
+    if (!action.regionId) {
+        return [];
+    }
+    if (action.scope === "all") {
+        return layerTracksByRegionId.get(action.regionId) ?? [];
+    }
+    const track = layerTracksByKey.get(createRegionLayerKey(action.regionId, action.layerName));
+    return track ? [track] : [];
+}
+function createRegionLayerKey(regionId, layerName) {
+    return `${regionId}\u0000${layerName}`;
 }
 function compareTimelineEvents(left, right) {
     const leftTime = Number.parseFloat(left.timestamp);

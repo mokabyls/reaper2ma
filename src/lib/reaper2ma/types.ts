@@ -63,6 +63,7 @@ export type ConvertedMarker = {
     isGlobal?: boolean;
     bumpAction?: BumpActionTag;
     regionActions?: RegionActionTag[];
+    regionLayerName?: string;
     start: string;
     color: string;
     regionTargetId?: string;
@@ -121,11 +122,26 @@ export type RegionSequence = {
     sequenceNumber: number;
 };
 
+export type RegionLayerSequence = {
+    regionId: string;
+    regionLabel: string;
+    layerName: string;
+    displayName: string;
+    start: string;
+    end: string;
+    color: string;
+    cues: SequenceCue[];
+    events: SequenceTrigger[];
+    sequenceNumber: number;
+};
+
 export type BumpSequence = {
     color: string;
     displayName: string;
     cues: SequenceCue[];
     events: SequenceTrigger[];
+    releaseDurationSeconds: string;
+    releaseWarnings?: string[];
     sequenceNumber: number;
 };
 
@@ -139,6 +155,7 @@ export type BpmSequenceEvent = {
 export type BpmSequence = {
     displayName: string;
     events: BpmSequenceEvent[];
+    releaseDurationSeconds: string;
     sequenceNumber: number;
 };
 
@@ -152,6 +169,7 @@ export type ConversionSettings = {
     pageSlotStart: number;
     bumpPageSlotStart: number;
     cueStartNumber: number;
+    regionEndPreRollMs: number;
     speedMaster: string;
     prefix: string;
     exportMode: ExportMode;
@@ -203,6 +221,7 @@ export type ConversionArtifacts = {
     outputBaseName: string;
     validationWarnings: string[];
     regionSequences: RegionSequence[];
+    regionLayerSequences: RegionLayerSequence[];
     uniqueCues: ConvertedMarker[];
     repeatedSequences: RepeatedSequence[];
     bumpSequences: BumpSequence[];

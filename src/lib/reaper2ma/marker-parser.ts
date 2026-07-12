@@ -31,6 +31,7 @@ type ParsedMarkerName = {
     isGlobal?: boolean;
     bumpAction?: BumpActionTag;
     regionTargetId?: string;
+    regionLayerName?: string;
     regionActions?: RegionActionTag[];
     cueTiming?: NonNullable<ConvertedMarker["cueTiming"]>;
     bpm?: number;
@@ -54,6 +55,7 @@ export function parseMarkerName(name: string): ParsedMarkerName {
     const displayName = sanitizeMarkerName(rawDisplayName.trim());
     const regionActions = extractRegionActions(tags);
     const regionTargetId = extractRegionTargetId(tags);
+    const regionLayerName = extractRegionLayerName(tags);
     const markerMetadata = markerTagProviderRegistry.enrich(tags.filter((tag) => !isRegionActionTag(tag) && !isRegionTargetTag(tag)));
     const isGlobal = tags.some(isGlobalScopeTag);
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
@@ -66,6 +68,7 @@ export function parseMarkerName(name: string): ParsedMarkerName {
         ...(isGlobal ? { isGlobal } : {}),
         ...(bumpAction ? { bumpAction } : {}),
         ...(regionTargetId ? { regionTargetId } : {}),
+        ...(regionLayerName ? { regionLayerName } : {}),
         ...(regionActions.length > 0
             ? {
                   regionActions,
@@ -148,6 +151,7 @@ export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] 
             ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
             ...(marker.bumpAction ? { bumpAction: marker.bumpAction } : {}),
             ...(marker.regionTargetId ? { regionTargetId: marker.regionTargetId } : {}),
+            ...(marker.regionLayerName ? { regionLayerName: marker.regionLayerName } : {}),
             ...(marker.regionActions && marker.regionActions.length > 0
                 ? {
                       regionActions: marker.regionActions,
@@ -254,7 +258,10 @@ function parseMarkerTagToken(token: string): MarkerTag | null {
         return null;
     }
 
-    const separatorIndex = trimmedToken.indexOf("_");
+    const equalsIndex = trimmedToken.indexOf("=");
+    const underscoreIndex = trimmedToken.indexOf("_");
+    const separatorIndex =
+        equalsIndex >= 0 && (underscoreIndex < 0 || equalsIndex < underscoreIndex) ? equalsIndex : underscoreIndex;
 
     if (separatorIndex < 0) {
         return {
@@ -407,4 +414,11 @@ function extractRegionActions(tags: MarkerTag[]): RegionActionTag[] {
 
 function extractRegionTargetId(tags: MarkerTag[]): string | undefined {
     return tags.find(isRegionTargetTag)?.key.trim().toUpperCase();
+}
+
+function extractRegionLayerName(tags: MarkerTag[]): string | undefined {
+    const layerTag = tags.find((tag) => tag.key.trim().toUpperCase() === "LAYER" && tag.value !== null);
+    const layerName = sanitizeMarkerName(layerTag?.value ?? "").trim();
+
+    return layerName || undefined;
 }

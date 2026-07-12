@@ -1,8 +1,9 @@
-import type { BpmSequence, BumpSequence, ConvertedMarker, RegionSequence, RepeatedSequence } from "./types.js";
+import type { BpmSequence, BumpSequence, ConvertedMarker, RegionLayerSequence, RegionSequence, RepeatedSequence } from "./types.js";
 
 export function collectTimecodeTimestamps(
     uniqueCues: ConvertedMarker[],
     regionSequences: RegionSequence[],
+    regionLayerSequences: RegionLayerSequence[],
     repeatedSequences: RepeatedSequence[],
     bumpSequences: BumpSequence[],
     bpmSequence?: BpmSequence,
@@ -10,9 +11,15 @@ export function collectTimecodeTimestamps(
     return [
         ...uniqueCues.map((cue) => cue.start),
         ...regionSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
+        ...regionLayerSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
         ...repeatedSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
-        ...bumpSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
-        ...(bpmSequence?.events.flatMap((event) => [event.timestamp, offsetTimestampByMilliseconds(event.timestamp, 500)]) ?? []),
+        ...bumpSequences.flatMap((sequence) =>
+            sequence.events.flatMap((event) => [event.timestamp, offsetTimestampBySeconds(event.timestamp, sequence.releaseDurationSeconds)]),
+        ),
+        ...(bpmSequence?.events.flatMap((event) => [
+            event.timestamp,
+            offsetTimestampBySeconds(event.timestamp, bpmSequence.releaseDurationSeconds),
+        ]) ?? []),
     ].filter((timestamp) => timestamp !== "");
 }
 
@@ -29,12 +36,13 @@ export function calculateTimecodeDuration(timestamps: string[]): string {
     return (maxTimestamp + 1).toFixed(3);
 }
 
-function offsetTimestampByMilliseconds(timestamp: string, milliseconds: number): string {
+function offsetTimestampBySeconds(timestamp: string, seconds: string): string {
     const parsedTimestamp = Number.parseFloat(timestamp);
+    const parsedSeconds = Number.parseFloat(seconds);
 
-    if (!Number.isFinite(parsedTimestamp)) {
+    if (!Number.isFinite(parsedTimestamp) || !Number.isFinite(parsedSeconds)) {
         return timestamp;
     }
 
-    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
+    return (parsedTimestamp + parsedSeconds).toFixed(3);
 }

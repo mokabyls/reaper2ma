@@ -1,9 +1,10 @@
 import { convertReaperColorToCssColor } from "./colors.js";
 import { createUniqueCuePlan } from "./cue-plan.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
-import type { ConversionArtifacts, ConversionSettings, RegionActionTag, SequenceTrigger } from "./types.js";
+import { collectTimecodeTimestamps } from "./timecode-duration.js";
+import type { ConversionArtifacts, ConversionSettings, RegionActionTag, RegionLayerSequence, SequenceTrigger } from "./types.js";
 
-export type TimelineTrackKind = "main" | "region" | "repeated" | "bump" | "bpm";
+export type TimelineTrackKind = "main" | "region" | "layer" | "repeated" | "bump" | "bpm";
 
 export type TimelinePreviewEvent = {
     id: string;
@@ -59,12 +60,12 @@ type InternalTimelineTrack = Omit<TimelinePreviewTrack, "events"> & {
     regionId?: string;
 };
 
-const BPM_RELEASE_DELAY_MS = 500;
 const FALLBACK_DURATION_SECONDS = 1;
 
 const FALLBACK_TRACK_COLORS: Record<TimelineTrackKind, string> = {
     main: "#00d45a",
     region: "#20c7d8",
+    layer: "#ff7ab6",
     repeated: "#f5d000",
     bump: "#f59e0b",
     bpm: "#b78cff",
@@ -73,6 +74,7 @@ const FALLBACK_TRACK_COLORS: Record<TimelineTrackKind, string> = {
 const KIND_LABELS: Record<TimelineTrackKind, string> = {
     main: "Main",
     region: "Region",
+    layer: "Layer",
     repeated: "Repeat",
     bump: "Bump",
     bpm: "BPM",
@@ -84,7 +86,14 @@ export function createTimelinePreview(artifacts: ConversionArtifacts, settings: 
     }
 
     const tracks = createTimelineTracks(artifacts, settings);
-    const timestamps = tracks.flatMap((track) => track.events.map((event) => event.timestamp));
+    const timestamps = collectTimecodeTimestamps(
+        artifacts.uniqueCues,
+        artifacts.regionSequences,
+        artifacts.regionLayerSequences,
+        artifacts.repeatedSequences,
+        artifacts.bumpSequences,
+        artifacts.bpmSequence,
+    );
     const durationSeconds = calculatePreviewDurationSeconds(timestamps);
     const ticks = createTimelineTicks(durationSeconds);
 
@@ -117,6 +126,14 @@ export function createTimelinePreview(artifacts: ConversionArtifacts, settings: 
 function createTimelineTracks(artifacts: ConversionArtifacts, settings: ConversionSettings): InternalTimelineTrack[] {
     const tracks: InternalTimelineTrack[] = [];
     const regionTracksById = new Map<string, InternalTimelineTrack>();
+    const layerSequencesByRegionId = new Map<string, RegionLayerSequence[]>();
+
+    for (const sequence of artifacts.regionSequences) {
+        layerSequencesByRegionId.set(
+            sequence.regionId,
+            artifacts.regionLayerSequences.filter((layerSequence) => layerSequence.regionId === sequence.regionId),
+        );
+    }
     let sourceOrder = 0;
 
     const addTrack = (track: Omit<InternalTimelineTrack, "id" | "trackIndex" | "kindLabel" | "laneCount" | "events">): InternalTimelineTrack => {
@@ -177,6 +194,19 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
         for (const event of sequence.events) {
             addSequenceTriggerEvent(track, event, false, 1, sourceOrder++);
         }
+
+        for (const layerSequence of layerSequencesByRegionId.get(sequence.regionId) ?? []) {
+            const layerTrack = addTrack({
+                kind: "layer",
+                sequenceNumber: layerSequence.sequenceNumber,
+                displayName: layerSequence.displayName,
+                color: resolveTrackColor("layer", layerSequence.color),
+            });
+
+            for (const event of layerSequence.events) {
+                addSequenceTriggerEvent(layerTrack, event, false, 1, sourceOrder++);
+            }
+        }
     }
 
     for (const sequence of artifacts.repeatedSequences) {
@@ -224,16 +254,6 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
                 cueName,
                 label: cueName,
                 isDerived: false,
-                priority: 1,
-                sourceOrder: sourceOrder++,
-            });
-            addTimelineEvent(track, {
-                timestamp: offsetTimestampByMilliseconds(event.timestamp, BPM_RELEASE_DELAY_MS),
-                token: "TempRelease",
-                cueNumber,
-                cueName,
-                label: `${cueName} release`,
-                isDerived: true,
                 priority: 1,
                 sourceOrder: sourceOrder++,
             });
@@ -416,16 +436,6 @@ function formatTimelineTime(timestamp: string): string {
     }
 
     return `${parsed.toFixed(2)}s`;
-}
-
-function offsetTimestampByMilliseconds(timestamp: string, milliseconds: number): string {
-    const parsedTimestamp = Number.parseFloat(timestamp);
-
-    if (!Number.isFinite(parsedTimestamp)) {
-        return timestamp;
-    }
-
-    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
 }
 
 function sortRegionActions(actions: RegionActionTag[]): RegionActionTag[] {

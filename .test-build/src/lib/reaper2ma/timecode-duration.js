@@ -1,10 +1,14 @@
-export function collectTimecodeTimestamps(uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence) {
+export function collectTimecodeTimestamps(uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence) {
     return [
         ...uniqueCues.map((cue) => cue.start),
         ...regionSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
+        ...regionLayerSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
         ...repeatedSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
-        ...bumpSequences.flatMap((sequence) => sequence.events.map((event) => event.timestamp)),
-        ...(bpmSequence?.events.flatMap((event) => [event.timestamp, offsetTimestampByMilliseconds(event.timestamp, 500)]) ?? []),
+        ...bumpSequences.flatMap((sequence) => sequence.events.flatMap((event) => [event.timestamp, offsetTimestampBySeconds(event.timestamp, sequence.releaseDurationSeconds)])),
+        ...(bpmSequence?.events.flatMap((event) => [
+            event.timestamp,
+            offsetTimestampBySeconds(event.timestamp, bpmSequence.releaseDurationSeconds),
+        ]) ?? []),
     ].filter((timestamp) => timestamp !== "");
 }
 export function calculateTimecodeDuration(timestamps) {
@@ -17,11 +21,12 @@ export function calculateTimecodeDuration(timestamps) {
     }, 0);
     return (maxTimestamp + 1).toFixed(3);
 }
-function offsetTimestampByMilliseconds(timestamp, milliseconds) {
+function offsetTimestampBySeconds(timestamp, seconds) {
     const parsedTimestamp = Number.parseFloat(timestamp);
-    if (!Number.isFinite(parsedTimestamp)) {
+    const parsedSeconds = Number.parseFloat(seconds);
+    if (!Number.isFinite(parsedTimestamp) || !Number.isFinite(parsedSeconds)) {
         return timestamp;
     }
-    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
+    return (parsedTimestamp + parsedSeconds).toFixed(3);
 }
 //# sourceMappingURL=timecode-duration.js.map

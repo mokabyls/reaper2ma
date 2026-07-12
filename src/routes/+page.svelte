@@ -10,6 +10,10 @@
         downloadBlob,
         exampleMacroPresetGroups,
         parseReaperMarkerRows,
+        clampRegionEndPreRollMs,
+        DEFAULT_REGION_END_PRE_ROLL_MS,
+        MAX_REGION_END_PRE_ROLL_MS,
+        MIN_REGION_END_PRE_ROLL_MS,
         resolveExampleMacroTimecodeName,
         resolveSpeedMaster,
         stripFileExtension,
@@ -37,6 +41,7 @@
     let pageSlotStart = 201;
     let bumpPageSlotStart = 101;
     let cueStartNumber = 1;
+    let regionEndPreRollMs = DEFAULT_REGION_END_PRE_ROLL_MS;
     let speedMasterNumber = 4;
     let resolvedSpeedMaster = "3.4";
     let prefix = "1";
@@ -97,6 +102,7 @@
         pageSlotStart,
         bumpPageSlotStart,
         cueStartNumber,
+        regionEndPreRollMs,
         speedMaster: resolvedSpeedMaster,
         prefix,
         importMode,
@@ -144,6 +150,7 @@
         pageSlotStart: number;
         bumpPageSlotStart: number;
         cueStartNumber: number;
+        regionEndPreRollMs: number;
         speedMasterNumber: number;
         prefix: string;
         importMode: ImportMode;
@@ -170,6 +177,7 @@
         pageSlotStart,
         bumpPageSlotStart,
         cueStartNumber,
+        regionEndPreRollMs: clampRegionEndPreRollMs(regionEndPreRollMs),
         speedMasterNumber: clampSpeedMasterNumber(speedMasterNumber),
         prefix,
         importMode,
@@ -196,6 +204,7 @@
         pageSlotStart,
         bumpPageSlotStart,
         cueStartNumber,
+        regionEndPreRollMs: clampRegionEndPreRollMs(regionEndPreRollMs),
         speedMaster: resolvedSpeedMaster,
         prefix,
         importMode,
@@ -313,6 +322,12 @@
         pageSlotStart = readPersistedInteger(storedSettings.pageSlotStart, pageSlotStart, 101, 490);
         bumpPageSlotStart = readPersistedInteger(storedSettings.bumpPageSlotStart, bumpPageSlotStart, 101, 490);
         cueStartNumber = readPersistedInteger(storedSettings.cueStartNumber, cueStartNumber, 1, 9999);
+        regionEndPreRollMs = readPersistedInteger(
+            storedSettings.regionEndPreRollMs,
+            regionEndPreRollMs,
+            MIN_REGION_END_PRE_ROLL_MS,
+            MAX_REGION_END_PRE_ROLL_MS,
+        );
         speedMasterNumber = readPersistedInteger(storedSettings.speedMasterNumber, speedMasterNumber, 1, 15);
         prefix = readPersistedString(storedSettings.prefix, prefix);
         importMode = isImportMode(storedSettings.importMode) ? storedSettings.importMode : importMode;
@@ -396,6 +411,10 @@
 
     function syncSpeedMasterNumber() {
         speedMasterNumber = clampSpeedMasterNumber(speedMasterNumber);
+    }
+
+    function syncRegionEndPreRollMs() {
+        regionEndPreRollMs = clampRegionEndPreRollMs(regionEndPreRollMs);
     }
 
     function createTimelineMinWidth(durationSeconds: number): number {
@@ -817,15 +836,28 @@
         }
 
         rows.push(
-            ...artifacts.regionSequences.map((sequence) => ({
-                sequenceNumber: sequence.sequenceNumber,
-                name: sequence.displayName,
-                kind: "Region",
-                cueCount: sequence.cues.length,
-                eventCount: sequence.events.length,
-                appearanceName: sequence.appearanceName ?? "Default",
-                executorSlotGroup: "main" as const,
-            })),
+            ...artifacts.regionSequences.flatMap((sequence) => [
+                {
+                    sequenceNumber: sequence.sequenceNumber,
+                    name: sequence.displayName,
+                    kind: "Region",
+                    cueCount: sequence.cues.length,
+                    eventCount: sequence.events.length,
+                    appearanceName: sequence.appearanceName ?? "Default",
+                    executorSlotGroup: "main" as const,
+                },
+                ...artifacts.regionLayerSequences
+                    .filter((layerSequence) => layerSequence.regionId === sequence.regionId)
+                    .map((layerSequence) => ({
+                        sequenceNumber: layerSequence.sequenceNumber,
+                        name: layerSequence.displayName,
+                        kind: "Layer",
+                        cueCount: layerSequence.cues.length,
+                        eventCount: layerSequence.events.length,
+                        appearanceName: "Cue appearances",
+                        executorSlotGroup: "main" as const,
+                    })),
+            ]),
             ...artifacts.repeatedSequences.map((sequence) => ({
                 sequenceNumber: sequence.sequenceNumber,
                 name: sequence.displayName,
@@ -1324,7 +1356,7 @@
                             <p>Use this when your CSV contains Reaper regions with End or Length. Each region becomes a sequence with automatic start/end cues, and markers inside that time range become additional cues.</p>
                             <div class="mode-example-list" aria-label="Regions and markers examples">
                                 <code>R2 Chorus, 10-20s -> region sequence</code>
-                                <code>10s / 20s -> Region Start / Region End</code>
+                                <code>10s / 20s - pre-roll -> Region Start / Region End</code>
                                 <code>Hit at 12s -> cue inside R2</code>
                                 <code>[R2] Prep at 8s -> forced into R2</code>
                             </div>
@@ -1402,12 +1434,31 @@
                         <span class="label-text">Advanced</span>
                         <span class="label-hint">Additional options</span>
                     </summary>
-                    <div>
-                        <label for="cue-start-number" class="label">
-                            <span class="label-text">Cue Start Number</span>
-                            <span class="label-hint">Starting number for cues (1-9999)</span>
-                        </label>
-                        <input id="cue-start-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
+                    <div class="advanced-settings-grid">
+                        <div class="input-group">
+                            <label for="cue-start-number" class="label">
+                                <span class="label-text">Cue Start Number</span>
+                                <span class="label-hint">Starting number for cues (1-9999)</span>
+                            </label>
+                            <input id="cue-start-number" type="number" min="1" max="9999" step="1" bind:value={cueStartNumber} class="input" />
+                        </div>
+
+                        <div class="input-group">
+                            <label for="region-end-pre-roll-ms" class="label">
+                                <span class="label-text">Region End pre-roll</span>
+                                <span class="label-hint">Milliseconds before region end unless a later marker takes over</span>
+                            </label>
+                            <input
+                                id="region-end-pre-roll-ms"
+                                type="number"
+                                min={MIN_REGION_END_PRE_ROLL_MS}
+                                max={MAX_REGION_END_PRE_ROLL_MS}
+                                step="50"
+                                bind:value={regionEndPreRollMs}
+                                on:change={syncRegionEndPreRollMs}
+                                class="input"
+                            />
+                        </div>
                     </div>
                 </details>
 
@@ -1454,6 +1505,10 @@
                         <article class="summary-stat">
                             <span class="summary-stat-label">Region cues</span>
                             <strong>{conversionPreview.regionMarkerCount}</strong>
+                        </article>
+                        <article class="summary-stat">
+                            <span class="summary-stat-label">Region layers</span>
+                            <strong>{conversionPreview.regionLayerSequenceCount}</strong>
                         </article>
                         <article class="summary-stat">
                             <span class="summary-stat-label">Main cues</span>
@@ -2048,7 +2103,7 @@
                     <div class="usage-item">
                         <div class="usage-title">Bump release</div>
                         <code>[Temp|Release_250] / [TempRelease]</code>
-                        <p><code>Release_...</code> sets a delay in milliseconds; <code>TempRelease</code> or <code>FlashRelease</code> closes the latest unmatched bump.</p>
+                        <p><code>Release_...</code> sets the timed OffCue in milliseconds; <code>TempRelease</code> or <code>FlashRelease</code> derives it from the latest unmatched bump.</p>
                     </div>
                     <div class="usage-item">
                         <div class="usage-title">Cue timing</div>
@@ -2069,6 +2124,11 @@
                         <div class="usage-title">Regions</div>
                         <code>R1 / R2 / [R2] Prep cue</code>
                         <p>Hybrid mode uses regions as sequences. Each region gets <code>Region Start</code> and <code>Region End</code> cues; a leading <code>[R2]</code> tag assigns a marker to that region sequence, even before the region starts.</p>
+                    </div>
+                    <div class="usage-item">
+                        <div class="usage-title">Region layers</div>
+                        <code>[LAYER=FX] Impact / [R2][LAYER=Voix] Pré-roll</code>
+                        <p><code>LAYER=...</code> creates a parallel sequence attached to the containing or targeted region.</p>
                     </div>
                     <div class="usage-item">
                         <div class="usage-title">Global markers</div>
@@ -3001,6 +3061,12 @@
         border-top: 1px solid var(--border-light);
     }
 
+    .advanced-settings-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
     .settings-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3107,7 +3173,8 @@
             padding: 1rem;
         }
 
-        .settings-grid {
+        .settings-grid,
+        .advanced-settings-grid {
             grid-template-columns: 1fr;
             gap: 1.5rem;
         }
@@ -4498,6 +4565,7 @@
         }
 
         .settings-grid,
+        .advanced-settings-grid,
         .import-mode-comparison,
         .summary-grid,
         .file-summary,

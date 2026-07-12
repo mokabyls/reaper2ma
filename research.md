@@ -8,8 +8,8 @@ The core product logic now lives in `src/lib/reaper2ma/*` rather than the page c
 
 The most important project-specific details for future agents are:
 
-- Reaper CSV rows are expected to have `#`, `Name`, `Start`, and `Color` headers.
-- Empty `Color` means a normal cue in the main sequence.
+- Reaper CSV rows are expected to have `#`, `Name`, and `Start` headers. `Color` is optional because REAPER omits it when no markers are colored.
+- Missing or empty `Color` means a normal cue in the main sequence.
 - Non-empty `Color` means an effect/repeated sequence; all rows sharing the same color become one grandMA3 sequence with one cue triggered multiple times.
 - In hybrid mode, rows with `End` or `Length` define regions; every region sequence receives automatic `Region Start` and `Region End` cues, and markers inside the innermost containing region become cues between those boundaries.
 - The exported `Start` value is used directly as seconds; the UI tells users to set Reaper's ruler time unit to seconds.
@@ -101,21 +101,22 @@ The page has one primary workflow:
 3. The original file name is normalized for output names.
 4. CSV rows are parsed into objects by header.
 5. Marker names are sanitized, duplicate names are suffixed, and optional bracket tags are parsed.
-6. In markers-only mode, rows with empty color become `uniqueCues`.
+6. In markers-only mode, rows with missing or empty color become `uniqueCues`.
 7. In markers-only mode, rows with non-empty color are grouped by exact color into `repeatedSequences`.
 8. In hybrid mode, rows with `End` or `Length` define regions. Markers are attached to the most nested containing region.
-9. In hybrid mode, markers inside regions become cues in a region sequence named from the region ID and label, for example `R2 - Introduction - Sub Region`. Each region sequence also receives automatic `Region Start` and `Region End` cues at the region boundaries. `Region End` is scheduled about 100 ms before the actual region end so it can run before a same-time sequence Off; if a marker already sits in that final window, `Region End` is merged into that marker name instead of creating another cue. If a marker sits on the exact same timestamp as a boundary cue, the names are merged, for example `Region Start + Marker Name`. Region color creates the sequence appearance and marker color creates the cue appearance.
+9. In hybrid mode, markers inside regions become cues in a region sequence named from the region ID and label, for example `R2 - Introduction - Sub Region`. Each region sequence also receives automatic `Region Start` and `Region End` cues at the region boundaries. `Region End` uses the configurable region-end pre-roll, defaulting to 750 ms before the actual region end so it can run before a same-time sequence Off; if a marker already sits in that final window, `Region End` is merged into the latest marker name instead of creating another cue. If a marker sits on the exact same timestamp as a boundary cue, the names are merged, for example `Region Start + Marker Name`. Region color creates the sequence appearance and marker color creates the cue appearance.
 10. A marker with a leading region target tag like `[R2]` is assigned to that region sequence even when it sits before the region start.
-11. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
-12. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
-13. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; if no release is found, the generator inserts a tiny fallback release just after the start.
-14. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-15. Macro XML is always generated and included in the final ZIP archive.
-16. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
-17. The Summary step is review-only and sends the user to Extras before download.
-18. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
-19. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
-20. User settings are persisted in browser `localStorage` under `reaper2ma:settings:v1`; CSV contents, generated artifacts, timeline cursor state, and filters are not persisted.
+11. A marker tagged `[LAYER=FX]` in hybrid mode is routed into a region-scoped layer sequence instead of the main region sequence. It uses the containing region or an explicit target like `[R2][LAYER=Voix]`, and a layer marker without any region target falls back to normal marker routing with a warning.
+12. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
+13. Markers with `Temp` or `Flash` execution tokens become bump overlays only when they are outside regions.
+14. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; the generator uses it to configure a timed `OffCue`, defaulting to 0.2 seconds when no release is found.
+15. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+16. Macro XML is always generated and included in the final ZIP archive.
+17. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
+18. The Summary step is review-only and sends the user to Extras before download.
+19. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
+20. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
+21. User settings are persisted in browser `localStorage` under `reaper2ma:settings:v1`; CSV contents, generated artifacts, timeline cursor state, and filters are not persisted.
 
 The default settings are:
 
@@ -126,6 +127,7 @@ The default settings are:
 - `pageSlotStart = 201`
 - `bumpPageSlotStart = 101`
 - `cueStartNumber = 1`
+- `regionEndPreRollMs = 750`
 - `speedMasterNumber = 4`, resolved in the UI to `speedMaster = "3.4"`
 - `prefix = "1"`, editable in the UI and used for repeated and bump sequence labels.
 - `importMode = "markers-only"`
@@ -140,14 +142,13 @@ The ZIP filename is `<filename>_<YYYYMMDD-HHmmss>.zip`, uses uncompressed ZIP en
 
 ## CSV input expectations
 
-The parser expects a Reaper marker CSV with these headers:
+The parser expects a Reaper marker CSV with these required headers:
 
 - `#`
 - `Name`
 - `Start`
-- `Color`
 
-The code does not explicitly validate the header row. Missing headers will usually fail during processing and show a generic error. `Start` values are treated as already-compatible grandMA3 seconds strings. `End` and `Length` are only used in hybrid mode to describe regions. There is no beat/timecode/frame conversion. The in-app instructions tell users to set Reaper's time unit to seconds before exporting.
+The `Color` header is optional because REAPER omits it when no markers are colored; missing color values are treated as empty colors. The code validates the required headers and warns with English messages when required columns or second-based timestamps look wrong. `Start` values are treated as already-compatible grandMA3 seconds strings. `End` and `Length` are only used in hybrid mode to describe regions. There is no beat/timecode/frame conversion. The in-app instructions tell users to set REAPER's time unit to seconds before exporting.
 
 File naming is intentionally aggressive:
 
@@ -176,17 +177,18 @@ Bracket tags are parsed from leading or trailing `[]` blocks:
 
 - Leading blocks can carry metadata like `BPM_129.5`, `CueFade_6/12`, `FadeFromX_0.5`, or `Temp`.
 - In hybrid mode, a leading region ID tag like `[R2]` explicitly routes the marker into that region sequence before falling back to position-based assignment.
+- In hybrid mode, `[LAYER=Name]` creates or reuses a layer sequence attached to the containing or explicitly targeted region. Layer cues are distinct per marker; their marker colors become cue appearances.
 - Trailing blocks can override the execution token, for example `Intro [Go+]`.
 - Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, `TempRelease`, `Flash`, and `FlashRelease`.
-- `Temp|Release_250` and `Flash|Release_120` create bump starts with an inline release delay in milliseconds.
-- `TempRelease` and `FlashRelease` close the most recent unmatched bump start of the same kind, using a stack per color in bump mode.
+- `Temp|Release_250` and `Flash|Release_120` create bump starts and set the generated sequence `OffCue` timing in milliseconds.
+- `TempRelease` and `FlashRelease` close the most recent unmatched bump start of the same kind to derive the generated sequence `OffCue` timing.
 - Cue timing tags are emitted on the generated macro line as `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...`.
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
 - Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to cue 1 on the target region track. `OFF` maps to an `Off` event on the target region track without cue assignment. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.
 
 ## Unique cue behavior
 
-Rows with empty `Color` are considered normal cues in the master sequence.
+Rows with missing or empty `Color` are considered normal cues in the master sequence.
 
 Macro commands for unique cues:
 
@@ -268,11 +270,12 @@ Macro specifics:
 - Generated sequences are created as local `Sequence 1..N` inside the temporary DataPool.
 - Every created sequence gets the configured Speed Master assignment.
 - If the base sequence has no unique cues, base-sequence macro lines are skipped to avoid `Cue 1 thru 0`.
-- In hybrid mode, region sequences are stored like regular sequences. They receive `Region Start` and `Region End` cues at the Reaper region boundaries, and their marker cues get labeled, timed, and optionally assigned appearances. `Region End` timecode events are emitted roughly 100 ms before the region end when there is no marker in that final window. Boundary cues merge into matching markers instead of creating duplicate cues, for example `Region End + Marker Name`.
+- In hybrid mode, region sequences are stored like regular sequences. They receive `Region Start` and `Region End` cues at the Reaper region boundaries, and their marker cues get labeled, timed, and optionally assigned appearances. `Region End` timecode events use the configured pre-roll, defaulting to 750 ms before the region end when there is no marker in that final window. Boundary cues merge into matching markers instead of creating duplicate cues, for example `Region End + Marker Name`.
+- Region layer sequences are stored immediately after their parent region sequence, named like `R2 - Chorus - FX`, assigned to normal page executors, and receive one cue per layer marker with optional cue appearance, `CueFade`, and cue timing modifiers.
 - Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} COLOR="1,1,1,0" BackR={0..255} BackG={0..255} BackB={0..255} BackAlpha=221`, then `Set DataPool "{temp}" Sequence {local} APPEARANCE="{name}"`.
 - Cue-level appearances use `Set DataPool "{temp}" Sequence {local} Cue {cueNumber} APPEARANCE="{name}"`.
-- BPM markers create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Temp` followed by `TempRelease` 500 ms later instead of `Go+`.
-- Main, region, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}`.
+- BPM markers create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Temp`; a timed `OffCue` handles the 0.5 second release.
+- Main, region, region layer, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}`.
 - Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}`, defaulting to the 100 executor row for button-style Temp/Flash playbacks.
 - grandMA3 executor rows are documented as 101-190 for button-only executors, 201-290 for button+fader executors, and 301-490 for button+knob executor rows. Hardware surfaces can expose fewer executor columns than the software range.
 - The macro finalizes with `Move DataPool "{temp}" Sequence 1 Thru At Sequence {firstFinalSequenceNumber}`, optional timecode move, and `Delete DataPool "{temp}" /NoConfirm`.
@@ -287,7 +290,7 @@ Command-driven timecode specifics:
 - Event timestamps stay in the CSV's seconds string format. Duration is still calculated from the latest generated timestamp plus one second.
 - The generator does not emit an audio track, fader subtracks, `RealtimeCmd`, `CueDestination`, `ValCueDestination`, or grandMA internal object/cue numeric IDs.
 
-Current behavior: timecode duration is calculated from the latest timestamp across unique cues, region cues, repeated sequence triggers, bump overlays, and BPM start/release events, plus one second. A unit test now covers a hybrid CSV where the latest event is not a main-sequence cue.
+Current behavior: timecode duration is calculated from the latest timestamp across unique cues, region cues, region layer cues, repeated sequence triggers, bump overlays, BPM events, and virtual release tails, plus one second. A unit test now covers a hybrid CSV where the latest event is not a main-sequence cue.
 
 Potential issue: the macro GUID is static, which may affect import/update behavior when multiple generated files are imported into the same grandMA3 environment. The timecode object is created by command and does not use a generated XML GUID.
 
@@ -314,11 +317,12 @@ The UI is a single page with:
 - Upload/drop zone.
 - Settings grid for sequence number, editable prefix, import/export mode selects, timecode number, page number, page slot start, and numeric Speed Master suffix.
 - Import mode helper comparing `Markers only` and `Regions + markers`, including examples of flat marker cues versus region rows becoming generated sequences.
-- Separate live executor preview showing main, region, and repeated sequence assignments from `Page {pageNumber}.{pageSlotStart}` plus bump assignments from `Page {pageNumber}.{bumpPageSlotStart}`. BPM helper sequences are intentionally omitted from this executor preview.
+- Separate live executor preview showing main, region, region layer, and repeated sequence assignments from `Page {pageNumber}.{pageSlotStart}` plus bump assignments from `Page {pageNumber}.{bumpPageSlotStart}`. BPM helper sequences are intentionally omitted from this executor preview.
 - Collapsible advanced section for cue start number.
 - Radio group for import mode and export mode.
 - Marker syntax help opened from the import step.
 - Converter settings are restored from browser local storage on page load and automatically saved when changed.
+- Advanced settings include a persisted `Region End pre-roll` field in milliseconds, defaulting to 750.
 - Summary sheet with dense sequence, executor, cue, appearance, and timecode columns.
 - Footer with upstream source link and copyright.
 

@@ -1,7 +1,7 @@
 import { sanitizeMarkerName } from "./marker-parser.js";
+import { clampRegionEndPreRollMs, DEFAULT_REGION_END_PRE_ROLL_MS } from "./settings.js";
 const REGION_START_CUE_NAME = "Region Start";
 const REGION_END_CUE_NAME = "Region End";
-const REGION_END_CUE_LEAD_MS = 100;
 const REGION_END_CUE_MIN_GAP_MS = 1;
 const NUMERIC_TIMESTAMP_PATTERN = /^-?\d+(?:\.\d+)?$/;
 export function parseRegions(rows) {
@@ -50,16 +50,24 @@ function resolveTargetRegion(regionTargetId, regions) {
     }
     return regions.find((region) => region.regionId === regionTargetId);
 }
-export function buildRegionSequences(markers, regions, sequenceNumber, resolveAppearance) {
+export function buildRegionSequences(markers, regions, sequenceNumber, resolveAppearance, regionEndPreRollMs = DEFAULT_REGION_END_PRE_ROLL_MS) {
     const regionSequences = [];
-    regions.forEach((region, index) => {
+    const regionLayerSequences = [];
+    const resolvedRegionEndPreRollMs = clampRegionEndPreRollMs(regionEndPreRollMs);
+    let nextSequenceNumber = sequenceNumber + 1;
+    regions.forEach((region) => {
         const regionMarkers = markers
             .map((marker, index) => ({ marker, index }))
-            .filter(({ marker }) => marker.regionId === region.regionId)
+            .filter(({ marker }) => marker.regionId === region.regionId && !marker.regionLayerName)
+            .sort((left, right) => compareMarkerStart(left.marker.start, right.marker.start, left.index, right.index))
+            .map(({ marker }) => marker);
+        const layerMarkers = markers
+            .map((marker, index) => ({ marker, index }))
+            .filter(({ marker }) => marker.regionId === region.regionId && marker.regionLayerName)
             .sort((left, right) => compareMarkerStart(left.marker.start, right.marker.start, left.index, right.index))
             .map(({ marker }) => marker);
         const sequenceAppearance = region.color ? resolveAppearance(region.color) : undefined;
-        const cuePlan = createRegionCuePlan(region, regionMarkers, resolveAppearance);
+        const cuePlan = createRegionCuePlan(region, regionMarkers, resolveAppearance, resolvedRegionEndPreRollMs);
         const cues = cuePlan.map((cue) => ({
             cueNumber: cue.cueNumber,
             name: cue.name,
@@ -118,19 +126,94 @@ export function buildRegionSequences(markers, regions, sequenceNumber, resolveAp
                     appearanceColor: sequenceAppearance.appearanceColor,
                 }
                 : {}),
-            sequenceNumber: sequenceNumber + index + 1,
+            sequenceNumber: nextSequenceNumber++,
         });
+        regionLayerSequences.push(...buildRegionLayerSequences(region, layerMarkers, nextSequenceNumber, resolveAppearance).map((sequence) => {
+            nextSequenceNumber = sequence.sequenceNumber + 1;
+            return sequence;
+        }));
     });
     return {
         regionSequences,
-        nextSequenceNumber: sequenceNumber + regions.length,
+        regionLayerSequences,
+        nextSequenceNumber: nextSequenceNumber - 1,
     };
 }
 function createRegionSequenceDisplayName(region) {
     const regionLabel = sanitizeMarkerName(region.regionLabel).trim();
     return regionLabel ? `${region.regionId} - ${regionLabel}` : region.regionId;
 }
-function createRegionCuePlan(region, markers, resolveAppearance) {
+function buildRegionLayerSequences(region, markers, sequenceNumber, resolveAppearance) {
+    const layerGroups = new Map();
+    let nextSequenceNumber = sequenceNumber;
+    for (const marker of markers) {
+        const layerName = marker.regionLayerName;
+        if (!layerName) {
+            continue;
+        }
+        layerGroups.set(layerName, [...(layerGroups.get(layerName) ?? []), marker]);
+    }
+    return [...layerGroups.entries()].map(([layerName, layerMarkers]) => {
+        const cuePlan = createRegionLayerCuePlan(layerMarkers, resolveAppearance);
+        return {
+            regionId: region.regionId,
+            regionLabel: region.regionLabel,
+            layerName,
+            displayName: createRegionLayerSequenceDisplayName(region, layerName),
+            start: region.start,
+            end: region.end,
+            color: layerMarkers.find((marker) => marker.color)?.color ?? region.color,
+            cues: cuePlan.map((cue) => ({
+                cueNumber: cue.cueNumber,
+                name: cue.name,
+                ...(cue.appearanceReference
+                    ? {
+                        appearanceName: cue.appearanceReference.appearanceName,
+                        appearanceNumber: cue.appearanceReference.appearanceNumber,
+                        appearanceColor: cue.appearanceReference.appearanceColor,
+                    }
+                    : {}),
+                ...(cue.cueFade !== undefined ? { cueFade: cue.cueFade } : {}),
+                ...(cue.cueTiming !== undefined ? { cueTiming: cue.cueTiming } : {}),
+            })),
+            events: cuePlan.map((cue) => ({
+                timestamp: cue.timestamp,
+                execToken: cue.execToken,
+                cueNumber: cue.cueNumber,
+                cueName: cue.name,
+                ...(cue.regionActions?.length ? { regionActions: cue.regionActions } : {}),
+                ...(cue.cueFade !== undefined ? { cueFade: cue.cueFade } : {}),
+                ...(cue.cueTiming !== undefined ? { cueTiming: cue.cueTiming } : {}),
+            })),
+            sequenceNumber: nextSequenceNumber++,
+        };
+    });
+}
+function createRegionLayerSequenceDisplayName(region, layerName) {
+    return `${createRegionSequenceDisplayName(region)} - ${layerName}`;
+}
+function createRegionLayerCuePlan(markers, resolveAppearance) {
+    const seenNames = new Map();
+    return markers.map((marker, index) => {
+        const cueNumber = index + 1;
+        const sanitizedName = sanitizeMarkerName(marker.displayName).trim();
+        const baseName = sanitizedName || `Cue ${cueNumber}`;
+        const count = (seenNames.get(baseName) ?? 0) + 1;
+        const appearanceReference = marker.color ? resolveAppearance(marker.color) : undefined;
+        seenNames.set(baseName, count);
+        return {
+            timestamp: marker.start,
+            execToken: marker.execToken,
+            cueNumber,
+            name: count === 1 ? baseName : `${baseName} ${count}`,
+            ...(appearanceReference ? { appearanceReference } : {}),
+            ...(marker.regionActions?.length ? { regionActions: marker.regionActions } : {}),
+            ...(marker.cueFade !== undefined ? { cueFade: marker.cueFade } : {}),
+            ...(marker.cueTiming !== undefined ? { cueTiming: marker.cueTiming } : {}),
+        };
+    });
+}
+function createRegionCuePlan(region, markers, resolveAppearance, regionEndPreRollMs) {
     const seenNames = new Map();
     const markerSources = markers.map((marker, index) => ({
         kind: "marker",
@@ -151,7 +234,7 @@ function createRegionCuePlan(region, markers, resolveAppearance) {
         {
             kind: "boundary",
             timestamp: region.end,
-            eventTimestamp: createRegionEndCueTimestamp(region),
+            eventTimestamp: createRegionEndCueTimestamp(region, regionEndPreRollMs),
             displayName: REGION_END_CUE_NAME,
             sortPriority: 2,
             sourceOrder: markers.length,
@@ -227,13 +310,13 @@ function mergeBoundarySourcesIntoMatchingMarkers(boundarySources, markerSources)
     }
     return [...remainingBoundarySources, ...markerSources];
 }
-function createRegionEndCueTimestamp(region) {
+function createRegionEndCueTimestamp(region, regionEndPreRollMs) {
     const endValue = parseNumericTimestamp(region.end);
     const startValue = parseNumericTimestamp(region.start);
     if (endValue === undefined || (startValue !== undefined && endValue <= startValue)) {
         return region.end;
     }
-    const leadSeconds = REGION_END_CUE_LEAD_MS / 1000;
+    const leadSeconds = clampRegionEndPreRollMs(regionEndPreRollMs) / 1000;
     const minGapSeconds = REGION_END_CUE_MIN_GAP_MS / 1000;
     let eventTimestamp = endValue - leadSeconds;
     if (startValue !== undefined && eventTimestamp <= startValue && endValue - startValue > minGapSeconds) {

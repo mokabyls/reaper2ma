@@ -60,6 +60,24 @@ function createCueTimingCommands(tempDataPoolName, sequence) {
 function createCueCommandCommands(tempDataPoolName, sequence) {
     return sequence.cues.flatMap((cue) => (cue.commands ?? []).map((command) => createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Property "Command" ${quoteCommandValue(command)}`)));
 }
+function createOffCueCommands(tempDataPoolName, sequence) {
+    if (sequence.offCueBehavior.kind === "none") {
+        return [];
+    }
+    if (sequence.offCueBehavior.kind === "follow") {
+        return [
+            createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`),
+        ];
+    }
+    const releaseDurationSeconds = sequence.offCueBehavior.releaseDurationSeconds;
+    return [
+        ...sequence.cues.map((cue) => createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Property "Assert" "Yes"`)),
+        createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber}.OffCue Property "TrigType" "Time"`),
+        createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber}.OffCue Property "TrigTime" ${quoteCommandValue(releaseDurationSeconds)}`),
+        createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber}.OffCue Property "CueFade" ${quoteCommandValue(releaseDurationSeconds)}`),
+        createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Property "UseExecutorTime" "No"`),
+    ];
+}
 function formatCueTimingModifiers(cueTiming) {
     return cueTiming.map((tag) => `${tag.key} ${quoteCommandValue(tag.value)}`).join(" ");
 }
@@ -82,11 +100,7 @@ function createSequenceSetupCommands(tempDataPoolName, settings, sequence) {
         ...createCueFadeCommands(tempDataPoolName, sequence),
         ...createCueTimingCommands(tempDataPoolName, sequence),
         ...createCueCommandCommands(tempDataPoolName, sequence),
-        ...(sequence.hasOffCue
-            ? [
-                createCommand(`Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue "OffCue" Property "TRIGTYPE" "Follow"`),
-            ]
-            : []),
+        ...createOffCueCommands(tempDataPoolName, sequence),
     ];
 }
 function createCueRange(firstCueNumber, lastCueNumber) {
@@ -98,8 +112,9 @@ function createCueRange(firstCueNumber, lastCueNumber) {
     }
     return `Cue ${firstCueNumber} Thru ${lastCueNumber}`;
 }
-function createGeneratedSequences(settings, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence) {
+function createGeneratedSequences(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence) {
     const generatedSequences = [];
+    const regionLayerSequencesByRegionId = groupRegionLayerSequencesByRegionId(regionLayerSequences);
     const addSequence = (sequence) => {
         generatedSequences.push({
             localSequenceNumber: generatedSequences.length + 1,
@@ -130,7 +145,7 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, repeate
             displayName: applySequenceNamePrefix(`Sequence ${settings.sequenceNumber}`, settings.sequenceNamePrefix),
             cues,
             events,
-            hasOffCue: false,
+            offCueBehavior: { kind: "none" },
         });
     }
     for (const sequence of regionSequences) {
@@ -139,12 +154,21 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, repeate
             displayName: sequence.displayName,
             cues: sequence.cues,
             events: sequence.events,
-            hasOffCue: true,
+            offCueBehavior: { kind: "follow" },
             ...(sequence.appearanceName ? { appearanceName: sequence.appearanceName } : {}),
             ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
             ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
             regionId: sequence.regionId,
         });
+        for (const layerSequence of regionLayerSequencesByRegionId.get(sequence.regionId) ?? []) {
+            addSequence({
+                finalSequenceNumber: layerSequence.sequenceNumber,
+                displayName: layerSequence.displayName,
+                cues: layerSequence.cues,
+                events: layerSequence.events,
+                offCueBehavior: { kind: "follow" },
+            });
+        }
     }
     for (const sequence of repeatedSequences) {
         addSequence({
@@ -152,7 +176,7 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, repeate
             displayName: sequence.displayName,
             cues: sequence.cues,
             events: sequence.events,
-            hasOffCue: true,
+            offCueBehavior: { kind: "follow" },
             appearanceName: sequence.appearanceName,
             appearanceNumber: sequence.appearanceNumber,
             appearanceColor: sequence.appearanceColor,
@@ -164,7 +188,7 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, repeate
             displayName: sequence.displayName,
             cues: sequence.cues,
             events: sequence.events,
-            hasOffCue: true,
+            offCueBehavior: { kind: "timed", releaseDurationSeconds: sequence.releaseDurationSeconds },
             executorSlotGroup: "bump",
         });
     }
@@ -177,29 +201,28 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, repeate
                 name: createBpmCueName(event.bpmText),
                 commands: [`Master ${settings.speedMaster} At BPM ${event.bpmText}`],
             })),
-            events: bpmSequence.events.flatMap((event, index) => {
+            events: bpmSequence.events.map((event, index) => {
                 const cueNumber = index + 1;
                 const cueName = createBpmCueName(event.bpmText);
-                return [
-                    {
-                        timestamp: event.timestamp,
-                        execToken: "Temp",
-                        cueNumber,
-                        cueName,
-                    },
-                    {
-                        timestamp: offsetTimestampByMilliseconds(event.timestamp, 500),
-                        execToken: "TempRelease",
-                        cueNumber,
-                        cueName,
-                    },
-                ];
+                return {
+                    timestamp: event.timestamp,
+                    execToken: "Temp",
+                    cueNumber,
+                    cueName,
+                };
             }),
-            hasOffCue: false,
+            offCueBehavior: { kind: "timed", releaseDurationSeconds: bpmSequence.releaseDurationSeconds },
             assignToExecutor: false,
         });
     }
     return generatedSequences;
+}
+function groupRegionLayerSequencesByRegionId(regionLayerSequences) {
+    const sequencesByRegionId = new Map();
+    for (const sequence of regionLayerSequences) {
+        sequencesByRegionId.set(sequence.regionId, [...(sequencesByRegionId.get(sequence.regionId) ?? []), sequence]);
+    }
+    return sequencesByRegionId;
 }
 function collectAppearanceSetupCommands(sequences) {
     const appearancesByNumber = new Map();
@@ -225,11 +248,11 @@ function collectAppearanceSetupCommands(sequences) {
         createCommand(`Set Appearance ${appearanceNumber} ${appearance.appearanceColor}`),
     ]);
 }
-function createTimecodeCommands(settings, tempDataPoolName, filename, sequences, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence) {
+function createTimecodeCommands(settings, tempDataPoolName, filename, sequences, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence) {
     if (settings.exportMode !== "cues-and-timecode" || sequences.length === 0) {
         return [];
     }
-    const duration = calculateTimecodeDuration(collectTimecodeTimestamps(uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence));
+    const duration = calculateTimecodeDuration(collectTimecodeTimestamps(uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence));
     const eventsBySequence = collectTimecodeEventsBySequence(sequences);
     const commands = [
         createCommand("cd root"),
@@ -334,17 +357,10 @@ function createPageAssignmentCommands(settings, tempDataPoolName, sequences) {
 function createBpmCueName(bpmText) {
     return `BPM ${bpmText}`;
 }
-function offsetTimestampByMilliseconds(timestamp, milliseconds) {
-    const parsedTimestamp = Number.parseFloat(timestamp);
-    if (!Number.isFinite(parsedTimestamp)) {
-        return timestamp;
-    }
-    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
-}
-export function generateMacroXML(settings, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence, filename) {
+export function generateMacroXML(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence, filename) {
     const tempDataPoolName = createTempDataPoolName(filename);
-    const sequences = createGeneratedSequences(settings, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence);
-    const timecodeCommands = createTimecodeCommands(settings, tempDataPoolName, filename, sequences, uniqueCues, regionSequences, repeatedSequences, bumpSequences, bpmSequence);
+    const sequences = createGeneratedSequences(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
+    const timecodeCommands = createTimecodeCommands(settings, tempDataPoolName, filename, sequences, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
     const firstFinalSequenceNumber = sequences[0]?.finalSequenceNumber;
     const obj = {
         ...XML_HEADER,

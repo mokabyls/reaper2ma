@@ -81,16 +81,27 @@ function convertMarkersOnlyArtifacts(
         settings.prefix,
         repeatedSequenceNamesByColor,
     );
+    const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
     const bpmMarkers = normalizedMarkers.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
-    const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], repeatedSequences, bumpSequences, bpmSequence);
-    const macroXml = generateMacroXML(settings, uniqueCues, prefixed.regionSequences, prefixed.repeatedSequences, prefixed.bumpSequences, prefixed.bpmSequence, outputBaseName);
+    const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], [], repeatedSequences, bumpSequences, bpmSequence);
+    const macroXml = generateMacroXML(
+        settings,
+        uniqueCues,
+        prefixed.regionSequences,
+        prefixed.regionLayerSequences,
+        prefixed.repeatedSequences,
+        prefixed.bumpSequences,
+        prefixed.bpmSequence,
+        outputBaseName,
+    );
 
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
-        validationWarnings,
+        validationWarnings: [...validationWarnings, ...bumpReleaseWarnings],
         regionSequences: prefixed.regionSequences,
+        regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,
         repeatedSequences: prefixed.repeatedSequences,
         bumpSequences: prefixed.bumpSequences,
@@ -110,36 +121,44 @@ function convertHybridArtifacts(
     const regions = parseRegions(regionRows);
     const markersWithRegions = assignMarkersToRegions(normalizedMarkers, regions);
     const outsideRegionMarkers = markersWithRegions.filter((marker) => !marker.regionId);
-    const { regionSequences, nextSequenceNumber: nextSequenceAfterRegions } = buildRegionSequences(
+    const {
+        regionSequences,
+        regionLayerSequences,
+        nextSequenceNumber: nextSequenceAfterRegionsAndLayers,
+    } = buildRegionSequences(
         markersWithRegions,
         regions,
         settings.sequenceNumber,
         appearanceRegistry.resolveAppearance,
+        settings.regionEndPreRollMs,
     );
     const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(outsideRegionMarkers);
     const repeatedSequences = groupRepeatedSequences(
         repeatedMarkers,
         settings.prefix,
-        nextSequenceAfterRegions,
+        nextSequenceAfterRegionsAndLayers,
         appearanceRegistry.nextAppearanceNumber(),
         appearanceRegistry.resolveAppearance,
     );
     const repeatedSequenceNamesByColor = new Map(repeatedSequences.map((sequence) => [sequence.color, sequence.displayName]));
     const bumpSequences = groupBumpSequences(
         bumpMarkers,
-        nextSequenceAfterRegions + repeatedSequences.length,
+        nextSequenceAfterRegionsAndLayers + repeatedSequences.length,
         settings.prefix,
         repeatedSequenceNamesByColor,
     );
+    const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
+    const regionLayerWarnings = collectRegionLayerWarnings(markersWithRegions);
     const bpmMarkers = markersWithRegions.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
     const bpmSequence = createBpmSequence(
         bpmMarkers,
         settings.sequenceNumber,
-        regionSequences.length + repeatedSequences.length + bumpSequences.length,
+        regionSequences.length + regionLayerSequences.length + repeatedSequences.length + bumpSequences.length,
     );
     const prefixed = prefixGeneratedSequences(
         settings.sequenceNamePrefix,
         regionSequences,
+        regionLayerSequences,
         repeatedSequences,
         bumpSequences,
         bpmSequence,
@@ -148,6 +167,7 @@ function convertHybridArtifacts(
         settings,
         uniqueCues,
         prefixed.regionSequences,
+        prefixed.regionLayerSequences,
         prefixed.repeatedSequences,
         prefixed.bumpSequences,
         prefixed.bpmSequence,
@@ -157,8 +177,9 @@ function convertHybridArtifacts(
     return {
         importMode: settings.importMode ?? "regions-and-markers",
         outputBaseName,
-        validationWarnings,
+        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...bumpReleaseWarnings],
         regionSequences: prefixed.regionSequences,
+        regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,
         repeatedSequences: prefixed.repeatedSequences,
         bumpSequences: prefixed.bumpSequences,
@@ -167,18 +188,33 @@ function convertHybridArtifacts(
     };
 }
 
+function collectBumpReleaseWarnings(bumpSequences: ConversionArtifacts["bumpSequences"]): string[] {
+    return bumpSequences.flatMap((sequence) => sequence.releaseWarnings ?? []);
+}
+
+function collectRegionLayerWarnings(markers: ConvertedMarker[]): string[] {
+    return markers
+        .filter((marker) => marker.regionLayerName && !marker.regionId)
+        .map(
+            (marker) =>
+                `Layer marker "${marker.displayName || "Cue"}" uses [LAYER=${marker.regionLayerName}] without a target region. It is handled as a normal marker.`,
+        );
+}
+
 function prefixGeneratedSequences(
     sequenceNamePrefix: string,
     regionSequences: ConversionArtifacts["regionSequences"],
+    regionLayerSequences: ConversionArtifacts["regionLayerSequences"],
     repeatedSequences: ConversionArtifacts["repeatedSequences"],
     bumpSequences: ConversionArtifacts["bumpSequences"],
     bpmSequence: ConversionArtifacts["bpmSequence"],
-): Pick<ConversionArtifacts, "regionSequences" | "repeatedSequences" | "bumpSequences" | "bpmSequence"> {
+): Pick<ConversionArtifacts, "regionSequences" | "regionLayerSequences" | "repeatedSequences" | "bumpSequences" | "bpmSequence"> {
     const prefix = sequenceNamePrefix.trim();
 
     if (!prefix) {
         return {
             regionSequences,
+            regionLayerSequences,
             repeatedSequences,
             bumpSequences,
             bpmSequence,
@@ -187,6 +223,10 @@ function prefixGeneratedSequences(
 
     return {
         regionSequences: regionSequences.map((sequence) => ({
+            ...sequence,
+            displayName: applySequenceNamePrefix(sequence.displayName, prefix),
+        })),
+        regionLayerSequences: regionLayerSequences.map((sequence) => ({
             ...sequence,
             displayName: applySequenceNamePrefix(sequence.displayName, prefix),
         })),

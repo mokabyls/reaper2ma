@@ -1,5 +1,7 @@
 import { createAppearanceNameFromReaperColor } from "./colors.js";
 const START_CUE_NAME = "Start";
+const DEFAULT_BUMP_RELEASE_DURATION_SECONDS = "0.2";
+const DEFAULT_BPM_RELEASE_DURATION_SECONDS = "0.5";
 export function splitMarkerRows(markers) {
     const bumpMarkers = markers.filter((marker) => isBumpMarker(marker));
     const nonBumpMarkers = markers.filter((marker) => !isBumpMarker(marker));
@@ -111,6 +113,7 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
     const bumpSequences = [];
     const sequencesByKey = new Map();
     const openStartsByColorAndKind = new Map();
+    const explicitReleaseDurationsBySequence = new Map();
     const usedSequenceNames = new Map();
     let nextSequenceNumber = sequenceNumber + 1;
     for (const marker of bumpMarkers) {
@@ -124,7 +127,10 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
             if (!openStart) {
                 continue;
             }
-            pushBumpReleaseEvent(openStart.sequence, marker.start);
+            const releaseDurationSeconds = calculateReleaseDurationSeconds(openStart.timestamp, marker.start);
+            if (releaseDurationSeconds !== undefined) {
+                applyExplicitBumpReleaseDuration(openStart.sequence, releaseDurationSeconds, explicitReleaseDurationsBySequence);
+            }
             continue;
         }
         const sequenceKey = `${marker.color}::${marker.displayName}`;
@@ -151,6 +157,7 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
                     },
                 ],
                 events: [],
+                releaseDurationSeconds: DEFAULT_BUMP_RELEASE_DURATION_SECONDS,
                 sequenceNumber: nextSequenceNumber++,
             };
             existing = {
@@ -163,7 +170,7 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
         }
         pushBumpStartEvent(existing.sequence, marker, bumpAction.kind);
         if (bumpAction.releaseDelayMs !== undefined) {
-            pushBumpReleaseEvent(existing.sequence, offsetTimestampByMilliseconds(marker.start, bumpAction.releaseDelayMs));
+            applyExplicitBumpReleaseDuration(existing.sequence, formatDurationSeconds(bumpAction.releaseDelayMs / 1000), explicitReleaseDurationsBySequence);
             continue;
         }
         const stackKey = createBumpStackKey(marker.color, bumpAction.kind);
@@ -175,11 +182,6 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
         });
         openStartsByColorAndKind.set(stackKey, openStarts);
     }
-    for (const openStarts of openStartsByColorAndKind.values()) {
-        for (const openStart of openStarts) {
-            pushBumpReleaseEvent(openStart.sequence, offsetTimestampByMilliseconds(openStart.timestamp, DEFAULT_BUMP_RELEASE_EPSILON_MS));
-        }
-    }
     return bumpSequences;
 }
 export function createBpmSequence(bpmMarkers, sequenceNumber, repeatedSequenceCount) {
@@ -189,6 +191,7 @@ export function createBpmSequence(bpmMarkers, sequenceNumber, repeatedSequenceCo
     return {
         displayName: "BPM",
         sequenceNumber: sequenceNumber + repeatedSequenceCount + 1,
+        releaseDurationSeconds: DEFAULT_BPM_RELEASE_DURATION_SECONDS,
         events: bpmMarkers.map((marker) => ({
             displayName: marker.displayName,
             timestamp: marker.start,
@@ -253,7 +256,6 @@ function isBumpReleaseExecutionToken(execToken) {
         .map((part) => part.trim().toLowerCase())
         .some((part) => part === "temprelease" || part === "flashrelease");
 }
-const DEFAULT_BUMP_RELEASE_EPSILON_MS = 1;
 function createBumpStackKey(color, kind) {
     return `${color}::${kind}`;
 }
@@ -280,14 +282,6 @@ function pushBumpStartEvent(sequence, marker, kind) {
             : {}),
     });
 }
-function pushBumpReleaseEvent(sequence, timestamp) {
-    sequence.events.push({
-        timestamp,
-        execToken: "Off",
-        cueNumber: 1,
-        cueName: START_CUE_NAME,
-    });
-}
 function inferBumpActionFromExecToken(execToken) {
     const normalized = execToken.trim().toLowerCase();
     if (normalized === "temp" || normalized === "flash") {
@@ -304,11 +298,33 @@ function inferBumpActionFromExecToken(execToken) {
     }
     return undefined;
 }
-function offsetTimestampByMilliseconds(timestamp, milliseconds) {
-    const parsedTimestamp = Number.parseFloat(timestamp);
-    if (!Number.isFinite(parsedTimestamp)) {
-        return timestamp;
+function calculateReleaseDurationSeconds(startTimestamp, releaseTimestamp) {
+    const start = Number.parseFloat(startTimestamp);
+    const release = Number.parseFloat(releaseTimestamp);
+    if (!Number.isFinite(start) || !Number.isFinite(release) || release < start) {
+        return undefined;
     }
-    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
+    return formatDurationSeconds(release - start);
+}
+function applyExplicitBumpReleaseDuration(sequence, releaseDurationSeconds, explicitReleaseDurationsBySequence) {
+    const existingDuration = explicitReleaseDurationsBySequence.get(sequence);
+    if (existingDuration === undefined) {
+        explicitReleaseDurationsBySequence.set(sequence, releaseDurationSeconds);
+        sequence.releaseDurationSeconds = releaseDurationSeconds;
+        return;
+    }
+    if (existingDuration === releaseDurationSeconds) {
+        return;
+    }
+    sequence.releaseWarnings = [
+        ...(sequence.releaseWarnings ?? []),
+        `Bump sequence "${sequence.displayName}" has multiple release durations (${existingDuration}s then ${releaseDurationSeconds}s). The first explicit duration (${existingDuration}s) is kept for the OffCue.`,
+    ];
+}
+function formatDurationSeconds(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+        return DEFAULT_BUMP_RELEASE_DURATION_SECONDS;
+    }
+    return Number(seconds.toFixed(3)).toString();
 }
 //# sourceMappingURL=sequence-services.js.map

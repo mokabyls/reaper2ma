@@ -1,4 +1,4 @@
-const REQUIRED_HEADERS = ["#", "Name", "Start", "Color"];
+const REQUIRED_HEADERS = ["#", "Name", "Start"];
 const TIME_FIELDS = ["Start", "End", "Length"];
 const SECONDS_VALUE_PATTERN = /^-?\d+(?:\.\d+)?$/;
 export function validateReaperCsvRows(headers, rows) {
@@ -7,13 +7,13 @@ export function validateReaperCsvRows(headers, rows) {
     const missingHeaders = REQUIRED_HEADERS.filter((header) => !normalizedHeaders.has(header));
     const nonSecondTimestamp = findNonSecondTimestamp(rows);
     if (missingHeaders.length > 0) {
-        warnings.push(`Le CSV ne contient pas la colonne ${formatHeaderList(missingHeaders)}. Vérifie l'export REAPER: les colonnes attendues sont #, Name, Start et Color.`);
+        warnings.push(`The CSV is missing ${formatHeaderList(missingHeaders)}. Check the REAPER export: the required columns are #, Name, and Start. Color is optional because REAPER omits it when no markers are colored.`);
     }
     if (nonSecondTimestamp) {
         const formatHint = hasMultipleDecimalSeparators(nonSecondTimestamp.value)
-            ? "Les timestamps semblent être en mesures/temps plutôt qu'en secondes."
-            : "Certaines valeurs de temps ne sont pas des secondes numériques.";
-        warnings.push(`${formatHint} Exemple: ${nonSecondTimestamp.field}="${nonSecondTimestamp.value}" à la ligne ${nonSecondTimestamp.lineNumber}. Réexporte le CSV depuis REAPER avec l'unité de temps en secondes, sinon les régions et le timecode peuvent être mal alignés.`);
+            ? "The timestamps look like measures/beats instead of seconds."
+            : "Some time values are not numeric seconds.";
+        warnings.push(`${formatHint} Example: ${nonSecondTimestamp.field}="${nonSecondTimestamp.value}" on line ${nonSecondTimestamp.lineNumber}. Re-export the CSV from REAPER with the ruler time unit set to seconds, otherwise regions and timecode can be misaligned.`);
     }
     return warnings;
 }
@@ -38,8 +38,8 @@ function hasMultipleDecimalSeparators(value) {
 }
 function formatHeaderList(headers) {
     if (headers.length === 1) {
-        return `"${headers[0]}"`;
+        return `the ${headers[0]} column`;
     }
-    return headers.map((header) => `"${header}"`).join(", ");
+    return `these columns: ${headers.join(", ")}`;
 }
 //# sourceMappingURL=csv-validation.js.map

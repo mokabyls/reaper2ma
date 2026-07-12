@@ -1,11 +1,12 @@
 import { convertReaperColorToCssColor } from "./colors.js";
 import { createUniqueCuePlan } from "./cue-plan.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
-const BPM_RELEASE_DELAY_MS = 500;
+import { collectTimecodeTimestamps } from "./timecode-duration.js";
 const FALLBACK_DURATION_SECONDS = 1;
 const FALLBACK_TRACK_COLORS = {
     main: "#00d45a",
     region: "#20c7d8",
+    layer: "#ff7ab6",
     repeated: "#f5d000",
     bump: "#f59e0b",
     bpm: "#b78cff",
@@ -13,6 +14,7 @@ const FALLBACK_TRACK_COLORS = {
 const KIND_LABELS = {
     main: "Main",
     region: "Region",
+    layer: "Layer",
     repeated: "Repeat",
     bump: "Bump",
     bpm: "BPM",
@@ -22,7 +24,7 @@ export function createTimelinePreview(artifacts, settings) {
         return createEmptyTimelinePreview("Cues only mode does not create grandMA3 timecode tracks.");
     }
     const tracks = createTimelineTracks(artifacts, settings);
-    const timestamps = tracks.flatMap((track) => track.events.map((event) => event.timestamp));
+    const timestamps = collectTimecodeTimestamps(artifacts.uniqueCues, artifacts.regionSequences, artifacts.regionLayerSequences, artifacts.repeatedSequences, artifacts.bumpSequences, artifacts.bpmSequence);
     const durationSeconds = calculatePreviewDurationSeconds(timestamps);
     const ticks = createTimelineTicks(durationSeconds);
     for (const track of tracks) {
@@ -51,6 +53,10 @@ export function createTimelinePreview(artifacts, settings) {
 function createTimelineTracks(artifacts, settings) {
     const tracks = [];
     const regionTracksById = new Map();
+    const layerSequencesByRegionId = new Map();
+    for (const sequence of artifacts.regionSequences) {
+        layerSequencesByRegionId.set(sequence.regionId, artifacts.regionLayerSequences.filter((layerSequence) => layerSequence.regionId === sequence.regionId));
+    }
     let sourceOrder = 0;
     const addTrack = (track) => {
         const trackIndex = tracks.length + 1;
@@ -97,6 +103,17 @@ function createTimelineTracks(artifacts, settings) {
         for (const event of sequence.events) {
             addSequenceTriggerEvent(track, event, false, 1, sourceOrder++);
         }
+        for (const layerSequence of layerSequencesByRegionId.get(sequence.regionId) ?? []) {
+            const layerTrack = addTrack({
+                kind: "layer",
+                sequenceNumber: layerSequence.sequenceNumber,
+                displayName: layerSequence.displayName,
+                color: resolveTrackColor("layer", layerSequence.color),
+            });
+            for (const event of layerSequence.events) {
+                addSequenceTriggerEvent(layerTrack, event, false, 1, sourceOrder++);
+            }
+        }
     }
     for (const sequence of artifacts.repeatedSequences) {
         const track = addTrack({
@@ -137,16 +154,6 @@ function createTimelineTracks(artifacts, settings) {
                 cueName,
                 label: cueName,
                 isDerived: false,
-                priority: 1,
-                sourceOrder: sourceOrder++,
-            });
-            addTimelineEvent(track, {
-                timestamp: offsetTimestampByMilliseconds(event.timestamp, BPM_RELEASE_DELAY_MS),
-                token: "TempRelease",
-                cueNumber,
-                cueName,
-                label: `${cueName} release`,
-                isDerived: true,
                 priority: 1,
                 sourceOrder: sourceOrder++,
             });
@@ -282,13 +289,6 @@ function formatTimelineTime(timestamp) {
         return timestamp;
     }
     return `${parsed.toFixed(2)}s`;
-}
-function offsetTimestampByMilliseconds(timestamp, milliseconds) {
-    const parsedTimestamp = Number.parseFloat(timestamp);
-    if (!Number.isFinite(parsedTimestamp)) {
-        return timestamp;
-    }
-    return (parsedTimestamp + milliseconds / 1000).toFixed(3);
 }
 function sortRegionActions(actions) {
     return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));

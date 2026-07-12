@@ -159,6 +159,8 @@ export type RegionLayerSequence = {
 export type BumpSequence = {
     color: string;
     displayName: string;
+    regionId?: string;
+    regionLabel?: string;
     cues: SequenceCue[];
     events: SequenceTrigger[];
     appearanceName?: string;

@@ -48,6 +48,7 @@ type GeneratedSequence = {
         start: string;
         end: string;
     };
+    timecodeRegionId?: string;
 };
 
 type TimecodeMacroEvent = {
@@ -56,6 +57,18 @@ type TimecodeMacroEvent = {
     cueNumber?: number;
     priority: number;
     sourceOrder: number;
+};
+
+type TimecodeTrackPlacement = {
+    sequence: GeneratedSequence;
+    groupIndex: number;
+    trackIndex: number;
+};
+
+type TimecodeTrackGroup = {
+    groupIndex: number;
+    name: string;
+    tracks: TimecodeTrackPlacement[];
 };
 
 const DEFAULT_WAIT = "0.10";
@@ -342,6 +355,7 @@ function createGeneratedSequences(
             ...(sequence.appearanceName ? { appearanceName: sequence.appearanceName } : {}),
             ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
             ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
+            ...(sequence.regionId ? { timecodeRegionId: sequence.regionId } : {}),
         });
     }
 
@@ -434,6 +448,7 @@ function createTimecodeCommands(
     }
 
     const eventsBySequence = collectTimecodeEventsBySequence(sequences, settings);
+    const trackGroups = createTimecodeTrackGroups(settings, filename, sequences);
     const duration = calculateTimecodeDuration([
         ...collectTimecodeTimestamps(uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence),
         ...[...eventsBySequence.values()].flatMap((events) => events.map((event) => event.timestamp)),
@@ -441,9 +456,10 @@ function createTimecodeCommands(
     const commands: MacroLine[] = [
         createCommand("cd root"),
         createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1`),
-        createCommand(`cd DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1`),
-        createCommand(`Store 1 ${quoteCommandValue(filename)}`),
-        createCommand("cd 1"),
+        ...trackGroups.flatMap((group) => [
+            createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1.${group.groupIndex}`),
+            createCommand(`Label DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1.${group.groupIndex} ${quoteCommandValue(group.name)}`),
+        ]),
         createCommand("cd root"),
         createCommand(`cd DataPool ${quoteCommandValue(tempDataPoolName)}`),
         createCommand('cd "Timecodes"'),
@@ -452,46 +468,110 @@ function createTimecodeCommands(
         createCommand('set 1 IGNOREFOLLOW="1"'),
     ];
 
-    for (const [index, sequence] of sequences.entries()) {
-        const trackIndex = index + 1;
-        const events = eventsBySequence.get(sequence.localSequenceNumber) ?? [];
+    for (const group of trackGroups) {
+        for (const placement of group.tracks) {
+            const { sequence, trackIndex } = placement;
+            const events = eventsBySequence.get(sequence.localSequenceNumber) ?? [];
 
-        commands.push(
-            createCommand("cd root"),
-            createCommand(`cd DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1`),
-            createCommand("cd 1"),
-        );
+            commands.push(
+                createCommand("cd root"),
+                createCommand(`cd DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1`),
+                createCommand(`cd ${group.groupIndex}`),
+            );
 
-        if (trackIndex > 1) {
-            commands.push(createCommand(`Store ${trackIndex}`));
+            if (trackIndex > 1) {
+                commands.push(createCommand(`Store ${trackIndex}`));
+            }
+
+            commands.push(
+                createCommand(`Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} At ${trackIndex}`),
+                createCommand(`cd ${trackIndex}`),
+                createCommand("cd 1"),
+                createCommand('Store Type "CmdSubTrack" 1'),
+                createCommand("cd 1"),
+                ...events.flatMap((event, eventIndex) => [
+                    createCommand(`Store ${eventIndex + 1}`),
+                    createCommand(`Set ${eventIndex + 1} "TIME" ${quoteCommandValue(event.timestamp)}`),
+                    createCommand(`Set ${eventIndex + 1} "TOKEN" ${quoteCommandValue(event.token)}`),
+                ]),
+                createCommand("cd root"),
+                createCommand(`cd DataPool ${quoteCommandValue(tempDataPoolName)}`),
+                ...events.flatMap((event, eventIndex) =>
+                    event.cueNumber === undefined
+                        ? []
+                        : [
+                              createCommand(
+                                  `Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${event.cueNumber} At Timecode 1.${group.groupIndex}.${trackIndex}.1.1.${eventIndex + 1}`,
+                              ),
+                          ],
+                ),
+            );
         }
-
-        commands.push(
-            createCommand(`Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} At ${trackIndex}`),
-            createCommand(`cd ${trackIndex}`),
-            createCommand("cd 1"),
-            createCommand('Store Type "CmdSubTrack" 1'),
-            createCommand("cd 1"),
-            ...events.flatMap((event, eventIndex) => [
-                createCommand(`Store ${eventIndex + 1}`),
-                createCommand(`Set ${eventIndex + 1} "TIME" ${quoteCommandValue(event.timestamp)}`),
-                createCommand(`Set ${eventIndex + 1} "TOKEN" ${quoteCommandValue(event.token)}`),
-            ]),
-            createCommand("cd root"),
-            createCommand(`cd DataPool ${quoteCommandValue(tempDataPoolName)}`),
-            ...events.flatMap((event, eventIndex) =>
-                event.cueNumber === undefined
-                    ? []
-                    : [
-                          createCommand(
-                              `Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${event.cueNumber} At Timecode 1.1.${trackIndex}.1.1.${eventIndex + 1}`,
-                          ),
-                      ],
-            ),
-        );
     }
 
     return commands;
+}
+
+function createTimecodeTrackGroups(settings: ConversionSettings, filename: string, sequences: GeneratedSequence[]): TimecodeTrackGroup[] {
+    const isHybridMode = settings.importMode === "regions-and-markers";
+    const groups: TimecodeTrackGroup[] = [];
+    const groupsByRegionId = new Map<string, TimecodeTrackGroup>();
+    const regionGroupNamesById = new Map(
+        sequences.filter((sequence) => sequence.regionId).map((sequence) => [sequence.regionId as string, sequence.displayName]),
+    );
+    let globalGroup: TimecodeTrackGroup | undefined;
+
+    const createGroup = (name: string): TimecodeTrackGroup => {
+        const group: TimecodeTrackGroup = {
+            groupIndex: groups.length + 1,
+            name,
+            tracks: [],
+        };
+
+        groups.push(group);
+
+        return group;
+    };
+
+    const ensureGlobalGroup = (): TimecodeTrackGroup => {
+        globalGroup ??= createGroup(isHybridMode ? "Global" : filename);
+
+        return globalGroup;
+    };
+
+    const ensureRegionGroup = (regionId: string): TimecodeTrackGroup => {
+        const existingGroup = groupsByRegionId.get(regionId);
+
+        if (existingGroup) {
+            return existingGroup;
+        }
+
+        const group = createGroup(regionGroupNamesById.get(regionId) ?? regionId);
+        groupsByRegionId.set(regionId, group);
+
+        return group;
+    };
+
+    if (!isHybridMode || sequences.some((sequence) => resolveSequenceTimecodeRegionId(sequence) === undefined)) {
+        ensureGlobalGroup();
+    }
+
+    for (const sequence of sequences) {
+        const regionId = isHybridMode ? resolveSequenceTimecodeRegionId(sequence) : undefined;
+        const group = regionId ? ensureRegionGroup(regionId) : ensureGlobalGroup();
+
+        group.tracks.push({
+            sequence,
+            groupIndex: group.groupIndex,
+            trackIndex: group.tracks.length + 1,
+        });
+    }
+
+    return groups;
+}
+
+function resolveSequenceTimecodeRegionId(sequence: GeneratedSequence): string | undefined {
+    return sequence.regionId ?? sequence.regionLayer?.regionId ?? sequence.timecodeRegionId;
 }
 
 function collectTimecodeEventsBySequence(sequences: GeneratedSequence[], settings: ConversionSettings): Map<number, TimecodeMacroEvent[]> {

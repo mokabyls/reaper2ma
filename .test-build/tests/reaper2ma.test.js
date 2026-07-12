@@ -60,9 +60,9 @@ function getMacroCommands(xml) {
     const parsed = parseXml(xml);
     return asArray(parsed.GMA3.Macro.MacroLine).map((line) => line["@_Command"]);
 }
-function getTimecodeTrackCommands(commands, tempDataPoolName, trackIndex) {
-    const assignCommand = `Assign DataPool "${tempDataPoolName}" Sequence ${trackIndex} At ${trackIndex}`;
-    const startIndex = commands.indexOf(assignCommand);
+function getTimecodeTrackCommands(commands, tempDataPoolName, sequenceIndex) {
+    const assignPattern = new RegExp(`^Assign DataPool "${tempDataPoolName}" Sequence ${sequenceIndex} At \\d+$`);
+    const startIndex = commands.findIndex((command) => assignPattern.test(command));
     assert.notEqual(startIndex, -1);
     const nextAssignIndex = commands.findIndex((command, index) => index > startIndex && /^Assign DataPool ".*" Sequence \d+ At \d+$/.test(command));
     return commands.slice(startIndex, nextAssignIndex === -1 ? undefined : nextAssignIndex);
@@ -644,7 +644,8 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.repeatedSequences.length, 1);
         assert.equal(artifacts.repeatedSequences[0].displayName, "MA 1 - Harry Potter Deb");
         assert.equal(artifacts.bumpSequences.length, 1);
-        assert.equal(artifacts.bumpSequences[0].displayName, "MA 1 - BUMP - Blanc");
+        assert.equal(artifacts.bumpSequences[0].displayName, "MA R2 - Introduction - Sub Region - BUMP - Blanc");
+        assert.equal(artifacts.bumpSequences[0].regionId, "R2");
         assert.equal(artifacts.bumpSequences[0].events[0].timestamp, "13.810");
         assert.equal(artifacts.bumpSequences[0].events.length, 1);
         assert.equal(artifacts.bumpSequences[0].releaseDurationSeconds, "0.25");
@@ -653,8 +654,8 @@ R2,Region Two,5,10,5,
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 1 "MA R1 - Introduction"`), true);
         assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 2 "MA R2 - Introduction - Sub Region"`), true);
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 "MA R2 - Introduction - Sub Region"`), true);
-        assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 4 "MA 1 - BUMP - Blanc"`), true);
-        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 4 "MA 1 - BUMP - Blanc"`), true);
+        assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Sequence 4 "MA R2 - Introduction - Sub Region - BUMP - Blanc"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 4 "MA R2 - Introduction - Sub Region - BUMP - Blanc"`), true);
         assert.equal(commands.includes("Store Appearance 9001"), true);
         assert.equal(commands.includes('Set Appearance 9001 COLOR="1,1,1,0" BackR=217 BackG=61 BackB=0 BackAlpha=221'), true);
         assert.equal(commands.includes(`Set DataPool "${tempDataPoolName}" Sequence 2 Cue 4 APPEARANCE="R2MA Color F2FF00"`), true);
@@ -666,8 +667,11 @@ R2,Region Two,5,10,5,
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 6 "Fin montée"`), true);
         assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Sequence 2 Cue 7 "Region End"`), true);
         assert.equal(commands.includes(`Store DataPool "${tempDataPoolName}" Timecode 1`), true);
-        assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1`), true);
-        assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 4 Cue 1 At Timecode 1.1.4.1.1.1`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Timecode 1.1 "Global"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Timecode 1.2 "MA R1 - Introduction"`), true);
+        assert.equal(commands.includes(`Label DataPool "${tempDataPoolName}" Timecode 1.3 "MA R2 - Introduction - Sub Region"`), true);
+        assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 2 Cue 1 At Timecode 1.3.1.1.1.1`), true);
+        assert.equal(commands.includes(`Assign DataPool "${tempDataPoolName}" Sequence 4 Cue 1 At Timecode 1.3.2.1.1.1`), true);
         assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Sequence 1 Thru At Sequence 9002`), true);
         assert.equal(commands.includes(`Move DataPool "${tempDataPoolName}" Timecode 1 Thru At Timecode 1`), true);
         assert.deepEqual(createConversionOutputFiles(artifacts).map((file) => file.name), ["testbillymarkerswithoutmpregionsmarkers_macro.xml"]);
@@ -723,7 +727,7 @@ R2,Chorus,10,20,10,
         ]);
         assert.equal(commands.includes('Label DataPool "R2MA explicitregion" Sequence 3 Cue 1 "Prep Chorus"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA explicitregion" Sequence 3 Cue 2 "Region Start + Chorus Start"'), true);
-        assert.equal(commands.includes('Assign DataPool "R2MA explicitregion" Sequence 3 Cue 1 At Timecode 1.1.3.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA explicitregion" Sequence 3 Cue 1 At Timecode 1.3.1.1.1.1'), true);
     });
     it("routes layer markers into region-scoped layer sequences", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -883,8 +887,10 @@ R2,Chorus,10,20,10,
         assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 2 Cue 2 APPEARANCE="R2MA Color F2FF00"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA regionlayers" Sequence 3 Cue 2 APPEARANCE="R2MA Color 654321"'), true);
         assert.equal(commands.includes('Set 2 "TOKEN" "Load"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA regionlayers" Timecode 1.1 "MA R1 - Verse"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA regionlayers" Timecode 1.2 "MA R2 - Chorus"'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
-        assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 5 Cue 1 At Timecode 1.1.5.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 5 Cue 1 At Timecode 1.2.2.1.1.1'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 1 At Page 1.201'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 2 At Page 1.202'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA regionlayers" Sequence 5 At Page 1.205'), true);
@@ -952,7 +958,7 @@ R2,Chorus,10,20,10,
         assert.equal(r1VoixTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
         assert.equal(r2FxTrackCommands.includes('Set 3 "TIME" "9"'), true);
         assert.equal(r2FxTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
-        assert.equal(r2FxTrackCommands.includes('Assign DataPool "R2MA layeroff" Sequence 5 Cue 2 At Timecode 1.1.5.1.1.3'), false);
+        assert.equal(r2FxTrackCommands.includes('Assign DataPool "R2MA layeroff" Sequence 5 Cue 2 At Timecode 1.2.2.1.1.3'), false);
     });
     it("creates layer pre-roll cues and keeps auto-off as a separate end event", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -1291,14 +1297,14 @@ R1,Black Region,0,10,10,#000000
         })), [
             {
                 color: "#6B6B6B",
-                displayName: "MA 1 - BUMP - HIT",
+                displayName: "MA R1 - Black Region - BUMP - HIT",
                 appearanceName: "R2MA Color #6B6B6B",
                 appearanceNumber: 9002,
                 cueAppearances: ["R2MA Color #6B6B6B"],
             },
             {
                 color: "#112233",
-                displayName: "MA 1 - BUMP - SNAP",
+                displayName: "MA R1 - Black Region - BUMP - SNAP",
                 appearanceName: "R2MA Color #112233",
                 appearanceNumber: 9003,
                 cueAppearances: ["R2MA Color #112233"],
@@ -1310,6 +1316,29 @@ R1,Black Region,0,10,10,#000000
         assert.equal(commands.includes('Set DataPool "R2MA bumpinheritedcolor" Sequence 2 APPEARANCE="R2MA Color #6B6B6B"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA bumpinheritedcolor" Sequence 2 Cue 1 APPEARANCE="R2MA Color #6B6B6B"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA bumpinheritedcolor" Sequence 3 APPEARANCE="R2MA Color #112233"'), true);
+    });
+    it("keeps global bumps in the global timecode group while region bumps stay with their region", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region A,0,10,10,#000000
+1,[GLOBAL][Temp] Global Hit,1,,,
+2,[Temp] Local Hit,2,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "global-bump-group.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.deepEqual(artifacts.bumpSequences.map((sequence) => ({
+            displayName: sequence.displayName,
+            regionId: sequence.regionId,
+        })), [
+            { displayName: "MA 1 - BUMP - Global Hit", regionId: undefined },
+            { displayName: "MA R1 - Region A - BUMP - Local Hit", regionId: "R1" },
+        ]);
+        assert.equal(commands.includes('Label DataPool "R2MA globalbumpgroup" Timecode 1.1 "Global"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA globalbumpgroup" Timecode 1.2 "MA R1 - Region A"'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA globalbumpgroup" Sequence 2 Cue 1 At Timecode 1.1.1.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA globalbumpgroup" Sequence 3 Cue 1 At Timecode 1.2.2.1.1.1'), true);
     });
     it("keeps layer and bump color fallbacks when a region color is unreadable", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -1363,7 +1392,7 @@ R2,Region Two,5,10,5,
         assert.notEqual(offTokenIndex, -1);
         assert.notEqual(onTokenIndex, -1);
         assert.ok(offTokenIndex < onTokenIndex);
-        assert.equal(commands.includes('Assign DataPool "R2MA regionactions" Sequence 2 Cue 1 At Timecode 1.1.2.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA regionactions" Sequence 2 Cue 1 At Timecode 1.2.1.1.1.1'), true);
     });
     it("ignores region rows in markers-only mode", () => {
         const artifacts = convertReaperCsvToArtifacts(regionFixtureCsv, "test-billy-markers-without-mp3_regions_markers.csv", baseSettings);

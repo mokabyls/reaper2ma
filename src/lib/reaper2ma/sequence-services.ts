@@ -9,6 +9,7 @@ import type {
     BpmSequence,
 } from "./types.js";
 import { createAppearanceNameFromReaperColor, createInheritedRegionBumpColor } from "./colors.js";
+import { sanitizeMarkerName } from "./marker-parser.js";
 
 const START_CUE_NAME = "Start";
 const DEFAULT_BUMP_RELEASE_DURATION_SECONDS = "0.2";
@@ -189,13 +190,14 @@ export function groupBumpSequences(
     for (const marker of bumpMarkers) {
         const bumpAction = marker.bumpAction ?? inferBumpActionFromExecToken(marker.execToken);
         const effectiveColor = resolveBumpMarkerColor(marker);
+        const regionScope = resolveBumpRegionScope(marker);
 
         if (!bumpAction) {
             continue;
         }
 
         if (bumpAction.phase === "release") {
-            const openStarts = openStartsByColorAndKind.get(createBumpStackKey(effectiveColor, bumpAction.kind));
+            const openStarts = openStartsByColorAndKind.get(createBumpStackKey(regionScope?.regionId, effectiveColor, bumpAction.kind));
             const openStart = openStarts?.pop();
 
             if (!openStart) {
@@ -211,15 +213,21 @@ export function groupBumpSequences(
             continue;
         }
 
-        const sequenceKey = `${effectiveColor}::${marker.displayName}`;
+        const sequenceKey = `${regionScope?.regionId ?? ""}::${effectiveColor}::${marker.displayName}`;
         let existing = sequencesByKey.get(sequenceKey);
 
         if (!existing) {
-            const baseSequenceName = baseSequenceNamesByColor.get(effectiveColor) ?? prefix;
+            const baseSequenceName = regionScope ? createRegionBumpBaseSequenceName(regionScope) : (baseSequenceNamesByColor.get(effectiveColor) ?? prefix);
             const appearanceReference = effectiveColor ? resolveAppearance?.(effectiveColor) : undefined;
             const bumpSequence: BumpSequence = {
                 color: effectiveColor,
                 displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
+                ...(regionScope
+                    ? {
+                          regionId: regionScope.regionId,
+                          regionLabel: regionScope.regionLabel,
+                      }
+                    : {}),
                 cues: [
                     {
                         cueNumber: 1,
@@ -276,7 +284,7 @@ export function groupBumpSequences(
             continue;
         }
 
-        const stackKey = createBumpStackKey(effectiveColor, bumpAction.kind);
+        const stackKey = createBumpStackKey(regionScope?.regionId, effectiveColor, bumpAction.kind);
         const openStarts = openStartsByColorAndKind.get(stackKey) ?? [];
         openStarts.push({
             sequence: existing.sequence,
@@ -398,8 +406,25 @@ function resolveBumpMarkerColor(marker: ConvertedMarker): string {
     return marker.regionContextColor ? (createInheritedRegionBumpColor(marker.regionContextColor) ?? "") : "";
 }
 
-function createBumpStackKey(color: string, kind: "Temp" | "Flash"): string {
-    return `${color}::${kind}`;
+function resolveBumpRegionScope(marker: ConvertedMarker): { regionId: string; regionLabel: string } | undefined {
+    if (marker.isGlobal || !marker.regionContextId) {
+        return undefined;
+    }
+
+    return {
+        regionId: marker.regionContextId,
+        regionLabel: marker.regionContextLabel ?? marker.regionContextId,
+    };
+}
+
+function createRegionBumpBaseSequenceName(regionScope: { regionId: string; regionLabel: string }): string {
+    const regionLabel = sanitizeMarkerName(regionScope.regionLabel).trim();
+
+    return regionLabel ? `${regionScope.regionId} - ${regionLabel}` : regionScope.regionId;
+}
+
+function createBumpStackKey(regionId: string | undefined, color: string, kind: "Temp" | "Flash"): string {
+    return `${regionId ?? ""}::${color}::${kind}`;
 }
 
 function pushBumpStartEvent(sequence: BumpSequence, marker: ConvertedMarker, kind: "Temp" | "Flash"): void {

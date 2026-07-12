@@ -113,14 +113,15 @@ The page has one primary workflow:
 15. Markers tagged `[GLOBAL]` or `[MAIN]` stay in the main sequence even when they fall inside a region.
 16. Markers with `Temp` or `Flash` execution tokens become bump overlays.
 17. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; the generator uses it to configure a timed `OffCue`, defaulting to 0.2 seconds when no release is found.
-18. In hybrid mode, an uncolored bump marker with a containing or explicitly targeted region inherits the readable region color lightened by 42%. That effective color is used for bump grouping, grandMA3 appearances, and timeline colors. Explicit bump marker colors still win and are not lightened.
-19. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
-20. Macro XML is always generated and included in the final ZIP archive.
-21. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, tracks, events, and cue assignments by command lines.
-22. The Summary step is review-only and sends the user to Extras before download.
-23. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
-24. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
-25. User settings are persisted in browser `localStorage` under `reaper2ma:settings:v1`; CSV contents, generated artifacts, timeline cursor state, and filters are not persisted.
+18. In hybrid mode, a non-global bump marker with a containing or explicitly targeted region becomes region-scoped. Its bump sequence is named from the region, belongs to that region's timecode track group, and is grouped separately from bumps in other regions even when the marker name and color match. A `[GLOBAL]` bump remains in the global timecode group.
+19. In hybrid mode, an uncolored bump marker with a containing or explicitly targeted region inherits the readable region color lightened by 42%. That effective color is used for bump grouping, grandMA3 appearances, and timeline colors. Explicit bump marker colors still win and are not lightened.
+20. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+21. Macro XML is always generated and included in the final ZIP archive.
+22. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, track groups, tracks, events, and cue assignments by command lines.
+23. The Summary step is review-only and sends the user to Extras before download.
+24. Optional example macro presets are included in the same ZIP when their `Show time` or `Timecode control` groups are checked, with a `Timecode Name` fallback to the imported CSV basename.
+25. Optional REAPER transport macros are included in the same ZIP only when `Include REAPER transport macros` is checked.
+26. User settings are persisted in browser `localStorage` under `reaper2ma:settings:v1`; CSV contents, generated artifacts, timeline cursor state, and filters are not persisted.
 
 The default settings are:
 
@@ -190,7 +191,7 @@ Bracket tags are parsed from leading or trailing `[]` blocks:
 - Supported execution tokens are `Go+`, `Go-`, `Goto`, `Load`, `On`, `Select`, `Top`, `Temp`, `TempRelease`, `Flash`, and `FlashRelease`.
 - `Temp|Release_250` and `Flash|Release_120` create bump starts and set the generated sequence `OffCue` timing in milliseconds.
 - `TempRelease` and `FlashRelease` close the most recent unmatched bump start of the same kind to derive the generated sequence `OffCue` timing.
-- In hybrid mode, uncolored bump markers keep their region context even though they route to bump overlays. If the context region has a readable color, the bump uses a 42% lightened version of the region color for grouping, grandMA3 appearance, and timeline color.
+- In hybrid mode, non-global bump markers keep their region context even though they route to bump overlays. If the context region has a readable color, the bump uses a 42% lightened version of the region color for grouping, grandMA3 appearance, and timeline color. Region-scoped bump grouping includes the region ID, so matching bump names/colors in two regions become two bump sequences. `[GLOBAL]` bump markers stay in the global timecode group.
 - Cue timing tags are emitted on the generated macro line as `Set DataPool "{temp}" Sequence ... Cue ... Part 0.1 ...`.
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
 - Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to cue 1 on the target region track. `OFF` maps to an `Off` event on the target region track without cue assignment. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.
@@ -287,15 +288,18 @@ Macro specifics:
 - Cue-level appearances use `Set DataPool "{temp}" Sequence {local} Cue {cueNumber} APPEARANCE="{name}"`.
 - BPM markers create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Temp`; a timed `OffCue` handles the 0.5 second release.
 - Main, region, region layer, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}`.
-- Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}`, defaulting to the 100 executor row for button-style Temp/Flash playbacks. Uncolored bump markers in readable colored regions inherit the 42% lightened region color for grouping, sequence/cue appearance, and timeline preview.
+- Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}`, defaulting to the 100 executor row for button-style Temp/Flash playbacks. Non-global bump markers in regions are region-scoped, named from their region, and placed in that region's timecode track group. Uncolored bump markers in readable colored regions inherit the 42% lightened region color for grouping, sequence/cue appearance, and timeline preview.
 - grandMA3 executor rows are documented as 101-190 for button-only executors, 201-290 for button+fader executors, and 301-490 for button+knob executor rows. Hardware surfaces can expose fewer executor columns than the software range.
 - The macro finalizes with `Move DataPool "{temp}" Sequence 1 Thru At Sequence {firstFinalSequenceNumber}`, optional timecode move, and `Delete DataPool "{temp}" /NoConfirm`.
 
 Command-driven timecode specifics:
 
-- In `cues-and-timecode` mode, the macro stores `DataPool "{temp}" Timecode 1`, creates a track per generated sequence, then moves it to `Timecode {timecodeNumber}`.
-- It uses the CuePoints-style command pattern: `Assign DataPool "{temp}" Sequence {local} At {track}`, `Store Type "CmdSubTrack" 1`, `Store {event}`, `Set {event} "TIME" "{Start}"`, and `Set {event} "TOKEN" "{execToken}"`.
-- Cue-to-event connections use `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.1.{track}.1.1.{event}`.
+- In `cues-and-timecode` mode, the macro stores `DataPool "{temp}" Timecode 1`, creates timecode track groups, creates a track per generated sequence inside those groups, then moves the timecode to `Timecode {timecodeNumber}`.
+- In markers-only mode, all tracks stay in one group named from the filename.
+- In hybrid mode, global material uses a `Global` track group when needed, and each region gets a group named from the generated region sequence. The region group contains the main region track, its layer tracks, and its non-global region-scoped bump tracks.
+- Track groups are created with commands like `Store DataPool "{temp}" Timecode 1.1` and named with `Label DataPool "{temp}" Timecode 1.1 "{groupName}"`.
+- It uses the CuePoints-style command pattern inside each group: `Assign DataPool "{temp}" Sequence {local} At {track}`, `Store Type "CmdSubTrack" 1`, `Store {event}`, `Set {event} "TIME" "{Start}"`, and `Set {event} "TOKEN" "{execToken}"`.
+- Cue-to-event connections use `Assign DataPool "{temp}" Sequence {local} Cue {cueNumber} At Timecode 1.{group}.{track}.1.1.{event}`.
 - `OFF_Rx` creates an `Off` event on the target region track without cue assignment.
 - `ON_Rx` creates a `Goto|Go+` event on the target region track assigned to cue 1.
 - `[OFF_LAYER=Name]` creates an `Off` event on the matching region layer track without cue assignment. `[OFF_LAYERS]` creates one `Off` event per layer track for that region.

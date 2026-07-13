@@ -3,6 +3,7 @@ import { calculateTimecodeDuration, collectTimecodeTimestamps } from "./timecode
 import { XML_HEADER, xmlBuilder } from "./xml-common.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
 const DEFAULT_WAIT = "0.10";
+const REGION_AUTO_OFF_AFTER_NEXT_START_SECONDS = 1;
 function createCommand(command, wait = DEFAULT_WAIT) {
     return {
         "@_Command": command,
@@ -160,6 +161,8 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, regionL
             ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
             ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
             regionId: sequence.regionId,
+            regionStart: sequence.start,
+            regionEnd: sequence.end,
         });
         for (const layerSequence of regionLayerSequencesByRegionId.get(sequence.regionId) ?? []) {
             addSequence({
@@ -359,6 +362,9 @@ function collectTimecodeEventsBySequence(sequences, settings) {
         .filter((sequence) => sequence.regionLayer)
         .map((sequence) => [createRegionLayerKey(sequence.regionLayer.regionId, sequence.regionLayer.layerName), sequence]));
     const regionLayerSequencesByRegionId = groupGeneratedRegionLayerSequencesByRegionId(sequences);
+    const regionAutoOffTimestampsById = createRegionAutoOffTimestampsById(sequences);
+    const manuallyOffedRegionIds = new Set();
+    const manuallyOffedRegionLayerKeys = new Set();
     let sourceOrder = 0;
     for (const sequence of sequences) {
         const sequenceEvents = eventsBySequence.get(sequence.localSequenceNumber);
@@ -378,10 +384,13 @@ function collectTimecodeEventsBySequence(sequences, settings) {
                 if (!targetSequence) {
                     continue;
                 }
+                if (action.kind === "OFF") {
+                    manuallyOffedRegionIds.add(action.regionId);
+                }
                 eventsBySequence.get(targetSequence.localSequenceNumber)?.push({
                     timestamp: event.timestamp,
                     token: action.kind === "ON" ? "Go+" : "Off",
-                    ...(action.kind === "ON" ? { cueNumber: 1 } : {}),
+                    ...(action.kind === "ON" ? { cueNumber: resolveRegionStartCueNumber(targetSequence) } : {}),
                     priority: action.kind === "OFF" ? 0 : 2,
                     sourceOrder: sourceOrder++,
                 });
@@ -389,6 +398,9 @@ function collectTimecodeEventsBySequence(sequences, settings) {
             for (const action of event.regionLayerActions ?? []) {
                 const targetSequences = resolveRegionLayerActionSequences(action, regionLayerSequencesByKey, regionLayerSequencesByRegionId);
                 for (const targetSequence of targetSequences) {
+                    if (targetSequence.regionLayer) {
+                        manuallyOffedRegionLayerKeys.add(createRegionLayerKey(targetSequence.regionLayer.regionId, targetSequence.regionLayer.layerName));
+                    }
                     eventsBySequence.get(targetSequence.localSequenceNumber)?.push({
                         timestamp: event.timestamp,
                         token: "Off",
@@ -399,13 +411,35 @@ function collectTimecodeEventsBySequence(sequences, settings) {
             }
         }
     }
+    for (const sequence of sequences) {
+        if (!sequence.regionId) {
+            continue;
+        }
+        if (manuallyOffedRegionIds.has(sequence.regionId)) {
+            continue;
+        }
+        const autoOffTimestamp = regionAutoOffTimestampsById.get(sequence.regionId);
+        if (!autoOffTimestamp) {
+            continue;
+        }
+        eventsBySequence.get(sequence.localSequenceNumber)?.push({
+            timestamp: autoOffTimestamp,
+            token: "Off",
+            priority: 3,
+            sourceOrder: sourceOrder++,
+        });
+    }
     if (settings.autoOffRegionLayers !== false) {
         for (const sequence of sequences) {
             if (!sequence.regionLayer) {
                 continue;
             }
+            const regionLayerKey = createRegionLayerKey(sequence.regionLayer.regionId, sequence.regionLayer.layerName);
+            if (manuallyOffedRegionLayerKeys.has(regionLayerKey)) {
+                continue;
+            }
             eventsBySequence.get(sequence.localSequenceNumber)?.push({
-                timestamp: sequence.regionLayer.end,
+                timestamp: regionAutoOffTimestampsById.get(sequence.regionLayer.regionId) ?? sequence.regionLayer.end,
                 token: "Off",
                 priority: 3,
                 sourceOrder: sourceOrder++,
@@ -416,6 +450,24 @@ function collectTimecodeEventsBySequence(sequences, settings) {
         events.sort(compareTimecodeMacroEvents);
     }
     return eventsBySequence;
+}
+function createRegionAutoOffTimestampsById(sequences) {
+    const regionSequences = sequences
+        .filter((sequence) => sequence.regionId && sequence.regionStart)
+        .sort((left, right) => compareTimestampStrings(left.regionStart ?? "", right.regionStart ?? "", left.localSequenceNumber, right.localSequenceNumber));
+    const autoOffTimestampsById = new Map();
+    for (let index = 0; index < regionSequences.length - 1; index += 1) {
+        const sequence = regionSequences[index];
+        const nextSequence = regionSequences[index + 1];
+        if (!sequence.regionId || !nextSequence.regionStart) {
+            continue;
+        }
+        autoOffTimestampsById.set(sequence.regionId, addSecondsToTimestamp(nextSequence.regionStart, REGION_AUTO_OFF_AFTER_NEXT_START_SECONDS));
+    }
+    return autoOffTimestampsById;
+}
+function resolveRegionStartCueNumber(sequence) {
+    return sequence.cues.find((cue) => cue.name === "Region Start" || cue.name.startsWith("Region Start + "))?.cueNumber ?? 1;
 }
 function groupGeneratedRegionLayerSequencesByRegionId(sequences) {
     const sequencesByRegionId = new Map();
@@ -442,6 +494,24 @@ function createRegionLayerKey(regionId, layerName) {
 }
 function sortRegionActions(actions) {
     return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));
+}
+function addSecondsToTimestamp(timestamp, seconds) {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+    return (parsedTimestamp + seconds).toFixed(3);
+}
+function compareTimestampStrings(left, right, leftFallback, rightFallback) {
+    const leftTime = Number.parseFloat(left);
+    const rightTime = Number.parseFloat(right);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+    if (left !== right) {
+        return left.localeCompare(right);
+    }
+    return leftFallback - rightFallback;
 }
 function compareTimecodeMacroEvents(left, right) {
     const leftTime = Number.parseFloat(left.timestamp);

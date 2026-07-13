@@ -3,6 +3,7 @@ import { createUniqueCuePlan } from "./cue-plan.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
 import { collectTimecodeTimestamps } from "./timecode-duration.js";
 const FALLBACK_DURATION_SECONDS = 1;
+const REGION_AUTO_OFF_AFTER_NEXT_START_SECONDS = 1;
 const FALLBACK_TRACK_COLORS = {
     main: "#00d45a",
     region: "#20c7d8",
@@ -59,6 +60,10 @@ function createTimelineTracks(artifacts, settings) {
     const layerTracksByKey = new Map();
     const layerTracksByRegionId = new Map();
     const layerSequencesByRegionId = new Map();
+    const regionAutoOffTimestampsById = createRegionAutoOffTimestampsById(artifacts.regionSequences);
+    const regionStartCueNumbersById = new Map(artifacts.regionSequences.map((sequence) => [sequence.regionId, resolveRegionStartCueNumber(sequence)]));
+    const manuallyOffedRegionIds = new Set();
+    const manuallyOffedRegionLayerKeys = new Set();
     for (const sequence of artifacts.regionSequences) {
         layerSequencesByRegionId.set(sequence.regionId, artifacts.regionLayerSequences.filter((layerSequence) => layerSequence.regionId === sequence.regionId));
     }
@@ -187,10 +192,15 @@ function createTimelineTracks(artifacts, settings) {
                 continue;
             }
             const token = action.kind === "ON" ? "Go+" : "Off";
+            if (action.kind === "OFF") {
+                manuallyOffedRegionIds.add(action.regionId);
+            }
             addTimelineEvent(targetTrack, {
                 timestamp: event.timestamp,
                 token,
-                ...(action.kind === "ON" ? { cueNumber: 1, cueName: "Cue 1" } : {}),
+                ...(action.kind === "ON"
+                    ? { cueNumber: regionStartCueNumbersById.get(action.regionId) ?? 1, cueName: "Region Start" }
+                    : {}),
                 label: `${action.kind} ${action.regionId}`,
                 isDerived: true,
                 priority: action.kind === "OFF" ? 0 : 2,
@@ -200,6 +210,9 @@ function createTimelineTracks(artifacts, settings) {
         for (const action of event.regionLayerActions ?? []) {
             const targetTracks = resolveRegionLayerActionTracks(action, layerTracksByKey, layerTracksByRegionId);
             for (const targetTrack of targetTracks) {
+                if (targetTrack.regionLayer) {
+                    manuallyOffedRegionLayerKeys.add(createRegionLayerKey(targetTrack.regionLayer.regionId, targetTrack.regionLayer.layerName));
+                }
                 addTimelineEvent(targetTrack, {
                     timestamp: event.timestamp,
                     token: "Off",
@@ -211,13 +224,37 @@ function createTimelineTracks(artifacts, settings) {
             }
         }
     }
+    for (const track of tracks) {
+        if (!track.regionId) {
+            continue;
+        }
+        if (manuallyOffedRegionIds.has(track.regionId)) {
+            continue;
+        }
+        const autoOffTimestamp = regionAutoOffTimestampsById.get(track.regionId);
+        if (!autoOffTimestamp) {
+            continue;
+        }
+        addTimelineEvent(track, {
+            timestamp: autoOffTimestamp,
+            token: "Off",
+            label: `Auto Off ${track.displayName}`,
+            isDerived: true,
+            priority: 3,
+            sourceOrder: sourceOrder++,
+        });
+    }
     if (settings.autoOffRegionLayers !== false) {
         for (const track of tracks) {
             if (!track.regionLayer) {
                 continue;
             }
+            const regionLayerKey = createRegionLayerKey(track.regionLayer.regionId, track.regionLayer.layerName);
+            if (manuallyOffedRegionLayerKeys.has(regionLayerKey)) {
+                continue;
+            }
             addTimelineEvent(track, {
-                timestamp: track.regionLayer.end,
+                timestamp: regionAutoOffTimestampsById.get(track.regionLayer.regionId) ?? track.regionLayer.end,
                 token: "Off",
                 label: `Auto Off ${track.regionLayer.layerName}`,
                 isDerived: true,
@@ -365,6 +402,37 @@ function compareTimelineEvents(left, right) {
         return left.priority - right.priority;
     }
     return left.sourceOrder - right.sourceOrder;
+}
+function createRegionAutoOffTimestampsById(regionSequences) {
+    const sortedRegionSequences = [...regionSequences].sort((left, right) => compareTimestampStrings(left.start, right.start, left.sequenceNumber, right.sequenceNumber));
+    const autoOffTimestampsById = new Map();
+    for (let index = 0; index < sortedRegionSequences.length - 1; index += 1) {
+        const sequence = sortedRegionSequences[index];
+        const nextSequence = sortedRegionSequences[index + 1];
+        autoOffTimestampsById.set(sequence.regionId, addSecondsToTimestamp(nextSequence.start, REGION_AUTO_OFF_AFTER_NEXT_START_SECONDS));
+    }
+    return autoOffTimestampsById;
+}
+function resolveRegionStartCueNumber(sequence) {
+    return sequence.cues.find((cue) => cue.name === "Region Start" || cue.name.startsWith("Region Start + "))?.cueNumber ?? 1;
+}
+function addSecondsToTimestamp(timestamp, seconds) {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+    return (parsedTimestamp + seconds).toFixed(3);
+}
+function compareTimestampStrings(left, right, leftFallback, rightFallback) {
+    const leftTime = Number.parseFloat(left);
+    const rightTime = Number.parseFloat(right);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+    if (left !== right) {
+        return left.localeCompare(right);
+    }
+    return leftFallback - rightFallback;
 }
 function assignTimelineEventLanes(events) {
     const laneLastPositions = [];

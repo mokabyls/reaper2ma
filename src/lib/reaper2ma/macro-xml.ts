@@ -42,6 +42,8 @@ type GeneratedSequence = {
     appearanceNumber?: number;
     appearanceColor?: string;
     regionId?: string;
+    regionStart?: string;
+    regionEnd?: string;
     regionLayer?: {
         regionId: string;
         layerName: string;
@@ -72,6 +74,7 @@ type TimecodeTrackGroup = {
 };
 
 const DEFAULT_WAIT = "0.10";
+const REGION_AUTO_OFF_AFTER_NEXT_START_SECONDS = 1;
 
 function createCommand(command: string, wait = DEFAULT_WAIT): MacroLine {
     return {
@@ -309,6 +312,8 @@ function createGeneratedSequences(
             ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
             ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
             regionId: sequence.regionId,
+            regionStart: sequence.start,
+            regionEnd: sequence.end,
         });
 
         for (const layerSequence of regionLayerSequencesByRegionId.get(sequence.regionId) ?? []) {
@@ -583,6 +588,9 @@ function collectTimecodeEventsBySequence(sequences: GeneratedSequence[], setting
             .map((sequence) => [createRegionLayerKey(sequence.regionLayer!.regionId, sequence.regionLayer!.layerName), sequence]),
     );
     const regionLayerSequencesByRegionId = groupGeneratedRegionLayerSequencesByRegionId(sequences);
+    const regionAutoOffTimestampsById = createRegionAutoOffTimestampsById(sequences);
+    const manuallyOffedRegionIds = new Set<string>();
+    const manuallyOffedRegionLayerKeys = new Set<string>();
     let sourceOrder = 0;
 
     for (const sequence of sequences) {
@@ -608,10 +616,14 @@ function collectTimecodeEventsBySequence(sequences: GeneratedSequence[], setting
                     continue;
                 }
 
+                if (action.kind === "OFF") {
+                    manuallyOffedRegionIds.add(action.regionId);
+                }
+
                 eventsBySequence.get(targetSequence.localSequenceNumber)?.push({
                     timestamp: event.timestamp,
                     token: action.kind === "ON" ? "Go+" : "Off",
-                    ...(action.kind === "ON" ? { cueNumber: 1 } : {}),
+                    ...(action.kind === "ON" ? { cueNumber: resolveRegionStartCueNumber(targetSequence) } : {}),
                     priority: action.kind === "OFF" ? 0 : 2,
                     sourceOrder: sourceOrder++,
                 });
@@ -621,6 +633,10 @@ function collectTimecodeEventsBySequence(sequences: GeneratedSequence[], setting
                 const targetSequences = resolveRegionLayerActionSequences(action, regionLayerSequencesByKey, regionLayerSequencesByRegionId);
 
                 for (const targetSequence of targetSequences) {
+                    if (targetSequence.regionLayer) {
+                        manuallyOffedRegionLayerKeys.add(createRegionLayerKey(targetSequence.regionLayer.regionId, targetSequence.regionLayer.layerName));
+                    }
+
                     eventsBySequence.get(targetSequence.localSequenceNumber)?.push({
                         timestamp: event.timestamp,
                         token: "Off",
@@ -632,14 +648,43 @@ function collectTimecodeEventsBySequence(sequences: GeneratedSequence[], setting
         }
     }
 
+    for (const sequence of sequences) {
+        if (!sequence.regionId) {
+            continue;
+        }
+
+        if (manuallyOffedRegionIds.has(sequence.regionId)) {
+            continue;
+        }
+
+        const autoOffTimestamp = regionAutoOffTimestampsById.get(sequence.regionId);
+
+        if (!autoOffTimestamp) {
+            continue;
+        }
+
+        eventsBySequence.get(sequence.localSequenceNumber)?.push({
+            timestamp: autoOffTimestamp,
+            token: "Off",
+            priority: 3,
+            sourceOrder: sourceOrder++,
+        });
+    }
+
     if (settings.autoOffRegionLayers !== false) {
         for (const sequence of sequences) {
             if (!sequence.regionLayer) {
                 continue;
             }
 
+            const regionLayerKey = createRegionLayerKey(sequence.regionLayer.regionId, sequence.regionLayer.layerName);
+
+            if (manuallyOffedRegionLayerKeys.has(regionLayerKey)) {
+                continue;
+            }
+
             eventsBySequence.get(sequence.localSequenceNumber)?.push({
-                timestamp: sequence.regionLayer.end,
+                timestamp: regionAutoOffTimestampsById.get(sequence.regionLayer.regionId) ?? sequence.regionLayer.end,
                 token: "Off",
                 priority: 3,
                 sourceOrder: sourceOrder++,
@@ -652,6 +697,30 @@ function collectTimecodeEventsBySequence(sequences: GeneratedSequence[], setting
     }
 
     return eventsBySequence;
+}
+
+function createRegionAutoOffTimestampsById(sequences: GeneratedSequence[]): Map<string, string> {
+    const regionSequences = sequences
+        .filter((sequence) => sequence.regionId && sequence.regionStart)
+        .sort((left, right) => compareTimestampStrings(left.regionStart ?? "", right.regionStart ?? "", left.localSequenceNumber, right.localSequenceNumber));
+    const autoOffTimestampsById = new Map<string, string>();
+
+    for (let index = 0; index < regionSequences.length - 1; index += 1) {
+        const sequence = regionSequences[index];
+        const nextSequence = regionSequences[index + 1];
+
+        if (!sequence.regionId || !nextSequence.regionStart) {
+            continue;
+        }
+
+        autoOffTimestampsById.set(sequence.regionId, addSecondsToTimestamp(nextSequence.regionStart, REGION_AUTO_OFF_AFTER_NEXT_START_SECONDS));
+    }
+
+    return autoOffTimestampsById;
+}
+
+function resolveRegionStartCueNumber(sequence: GeneratedSequence): number {
+    return sequence.cues.find((cue) => cue.name === "Region Start" || cue.name.startsWith("Region Start + "))?.cueNumber ?? 1;
 }
 
 function groupGeneratedRegionLayerSequencesByRegionId(sequences: GeneratedSequence[]): Map<string, GeneratedSequence[]> {
@@ -692,6 +761,31 @@ function createRegionLayerKey(regionId: string, layerName: string): string {
 
 function sortRegionActions(actions: NonNullable<SequenceTrigger["regionActions"]>): NonNullable<SequenceTrigger["regionActions"]> {
     return [...actions].sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "OFF" ? -1 : 1));
+}
+
+function addSecondsToTimestamp(timestamp: string, seconds: number): string {
+    const parsedTimestamp = Number.parseFloat(timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+        return timestamp;
+    }
+
+    return (parsedTimestamp + seconds).toFixed(3);
+}
+
+function compareTimestampStrings(left: string, right: string, leftFallback: number, rightFallback: number): number {
+    const leftTime = Number.parseFloat(left);
+    const rightTime = Number.parseFloat(right);
+
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+
+    if (left !== right) {
+        return left.localeCompare(right);
+    }
+
+    return leftFallback - rightFallback;
 }
 
 function compareTimecodeMacroEvents(left: TimecodeMacroEvent, right: TimecodeMacroEvent): number {

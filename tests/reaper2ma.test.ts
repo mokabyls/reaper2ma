@@ -693,6 +693,22 @@ R2,Region Two,5,10,5,
         );
     });
 
+    it("adds automatic region Off events when no manual OFF_Rx targets the region", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Region One,0,5,5,
+R2,Region Two,5,10,5,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "region-auto-off.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const r1TrackCommands = getTimecodeTrackCommands(commands, "R2MA regionautooff", 1);
+
+        assert.equal(r1TrackCommands.includes('Set 3 "TIME" "6.000"'), true);
+        assert.equal(r1TrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
+    });
+
     it("handles cues-only and non-numeric timestamps in timeline preview", () => {
         const csv = `#,Name,Start,Color
 1,Intro,not-a-time,
@@ -832,6 +848,7 @@ R2,Chorus,10,20,10,
         assert.equal(commands.includes('Label DataPool "R2MA explicitregion" Sequence 3 Cue 1 "Prep Chorus"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA explicitregion" Sequence 3 Cue 2 "Region Start + Chorus Start"'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA explicitregion" Sequence 3 Cue 1 At Timecode 1.3.1.1.1.1'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA explicitregion" Sequence 3 Cue 2 At Timecode 1.3.1.1.1.2'), true);
     });
 
     it("routes layer markers into region-scoped layer sequences", () => {
@@ -1069,16 +1086,20 @@ R2,Chorus,10,20,10,
             artifacts.regionLayerSequences.map((sequence) => `${sequence.regionId}:${sequence.layerName}`),
             ["R1:FX", "R1:Voix", "R2:FX"],
         );
-        assert.equal(r1TrackCommands.some((command) => command.includes('"TOKEN" "Off"')), false);
+        assert.equal(r1TrackCommands.includes('Set 5 "TIME" "11.000"'), true);
+        assert.equal(r1TrackCommands.includes('Set 5 "TOKEN" "Off"'), true);
         assert.equal(r1FxTrackCommands.includes('Set 3 "TIME" "4"'), true);
         assert.equal(r1FxTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
         assert.equal(r1FxTrackCommands.includes('Set 4 "TIME" "5"'), true);
         assert.equal(r1FxTrackCommands.includes('Set 4 "TOKEN" "Off"'), true);
+        assert.equal(r1FxTrackCommands.includes('Set 5 "TOKEN" "Off"'), false);
         assert.equal(r1FxTrackCommands.includes('Assign DataPool "R2MA layeroff" Sequence 2 Cue 2 At Timecode 1.1.2.1.1.3'), false);
         assert.equal(r1VoixTrackCommands.includes('Set 3 "TIME" "5"'), true);
         assert.equal(r1VoixTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
+        assert.equal(r1VoixTrackCommands.includes('Set 4 "TOKEN" "Off"'), false);
         assert.equal(r2FxTrackCommands.includes('Set 3 "TIME" "9"'), true);
         assert.equal(r2FxTrackCommands.includes('Set 3 "TOKEN" "Off"'), true);
+        assert.equal(r2FxTrackCommands.includes('Set 4 "TOKEN" "Off"'), false);
         assert.equal(r2FxTrackCommands.includes('Assign DataPool "R2MA layeroff" Sequence 5 Cue 2 At Timecode 1.2.2.1.1.3'), false);
     });
 
@@ -1211,11 +1232,11 @@ R1,Region A,0,10,10,
             })),
             [
                 { timestamp: "0", cueName: "Region Start" },
-                { timestamp: "9.950", cueName: "Region End + Last Marker" },
+                { timestamp: "9.250", cueName: "Region End + Last Marker" },
             ],
         );
         assert.equal(commands.includes('Label DataPool "R2MA nearregionend" Sequence 1 Cue 2 "Region End + Last Marker"'), true);
-        assert.equal(commands.includes('Set 2 "TIME" "9.950"'), true);
+        assert.equal(commands.includes('Set 2 "TIME" "9.250"'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA nearregionend" Sequence 1 Cue 2 At Timecode 1.1.1.1.1.2'), true);
         assert.equal(commands.includes('Label DataPool "R2MA nearregionend" Sequence 1 Cue 3'), false);
     });
@@ -1264,11 +1285,11 @@ R1,Region A,0,10,10,
             [
                 { timestamp: "0", cueName: "Region Start" },
                 { timestamp: "9.400", cueName: "Near Marker" },
-                { timestamp: "9.800", cueName: "Region End + Latest Marker" },
+                { timestamp: "9.250", cueName: "Region End + Latest Marker" },
             ],
         );
         assert.equal(commands.includes('Label DataPool "R2MA latestregionendmarker" Sequence 1 Cue 3 "Region End + Latest Marker"'), true);
-        assert.equal(commands.includes('Set 3 "TIME" "9.800"'), true);
+		assert.equal(commands.includes('Set 2 "TIME" "9.250"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA latestregionendmarker" Sequence 1 Cue 4'), false);
     });
 
@@ -1630,6 +1651,7 @@ R2,Region Two,5,10,5,
         assert.notEqual(onTokenIndex, -1);
         assert.ok(offTokenIndex < onTokenIndex);
         assert.equal(commands.includes('Assign DataPool "R2MA regionactions" Sequence 2 Cue 1 At Timecode 1.2.1.1.1.1'), true);
+        assert.equal(commands.includes('Set 5 "TIME" "6.000"'), false);
     });
 
     it("ignores region rows in markers-only mode", () => {

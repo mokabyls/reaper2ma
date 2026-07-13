@@ -573,9 +573,7 @@ function mergeBoundarySourcesIntoMatchingMarkers(
 
         mergeTarget.boundaryLabels = [...(mergeTarget.boundaryLabels ?? []), boundarySource.displayName];
 
-        if (boundarySource.displayName !== REGION_END_CUE_NAME || areTimestampsEqual(mergeTarget.timestamp, boundarySource.timestamp)) {
-            mergeTarget.boundaryEventTimestamp = boundarySource.eventTimestamp;
-        }
+        mergeTarget.boundaryEventTimestamp = boundarySource.eventTimestamp;
 
         mergeTarget.sortPriority = boundarySource.sortPriority;
     }
@@ -697,11 +695,11 @@ function compareRegionCuePlanSources(left: RegionCuePlanSource, right: RegionCue
     const leftTime = Number.parseFloat(left.timestamp);
     const rightTime = Number.parseFloat(right.timestamp);
 
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
-        return leftTime - rightTime;
-    }
-
-    if (left.timestamp !== right.timestamp) {
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+        if (leftTime !== rightTime) {
+            return leftTime - rightTime;
+        }
+    } else if (left.timestamp !== right.timestamp) {
         return left.timestamp.localeCompare(right.timestamp);
     }
 

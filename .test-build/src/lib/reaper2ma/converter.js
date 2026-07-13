@@ -39,8 +39,8 @@ function convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings
     const bumpSequences = groupBumpSequences(bumpMarkers, settings.sequenceNumber + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor, appearanceRegistry.resolveAppearance);
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
     const regionLayerWarnings = collectRegionLayerWarnings(normalizedMarkers, []);
-    const bpmMarkers = normalizedMarkers.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
-    const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
+    const bpmSources = collectBpmMarkerSources(normalizedMarkers);
+    const bpmSequence = createBpmSequence(bpmSources, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
     const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], [], repeatedSequences, bumpSequences, bpmSequence);
     const macroXml = generateMacroXML(settings, uniqueCues, prefixed.regionSequences, prefixed.regionLayerSequences, prefixed.repeatedSequences, prefixed.bumpSequences, prefixed.bpmSequence, outputBaseName);
     return {
@@ -67,8 +67,8 @@ function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, s
     const bumpSequences = groupBumpSequences(bumpMarkers, nextSequenceAfterRegionsAndLayers + repeatedSequences.length, settings.prefix, repeatedSequenceNamesByColor, appearanceRegistry.resolveAppearance);
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
     const regionLayerWarnings = collectRegionLayerWarnings(markersWithRegions, regionLayerSequences);
-    const bpmMarkers = markersWithRegions.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
-    const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, regionSequences.length + regionLayerSequences.length + repeatedSequences.length + bumpSequences.length);
+    const bpmSources = [...collectRegionBpmSources(regions), ...collectBpmMarkerSources(markersWithRegions)];
+    const bpmSequence = createBpmSequence(bpmSources, settings.sequenceNumber, regionSequences.length + regionLayerSequences.length + repeatedSequences.length + bumpSequences.length);
     const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
     const macroXml = generateMacroXML(settings, uniqueCues, prefixed.regionSequences, prefixed.regionLayerSequences, prefixed.repeatedSequences, prefixed.bumpSequences, prefixed.bpmSequence, outputBaseName);
     return {
@@ -86,6 +86,30 @@ function convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, s
 }
 function collectBumpReleaseWarnings(bumpSequences) {
     return bumpSequences.flatMap((sequence) => sequence.releaseWarnings ?? []);
+}
+function collectBpmMarkerSources(markers) {
+    return markers.flatMap((marker) => marker.bpm !== undefined && marker.bpmText !== undefined
+        ? [
+            {
+                displayName: marker.displayName,
+                start: marker.start,
+                bpm: marker.bpm,
+                bpmText: marker.bpmText,
+            },
+        ]
+        : []);
+}
+function collectRegionBpmSources(regions) {
+    return regions.flatMap((region) => region.bpm !== undefined && region.bpmText !== undefined
+        ? [
+            {
+                displayName: region.regionLabel,
+                start: region.start,
+                bpm: region.bpm,
+                bpmText: region.bpmText,
+            },
+        ]
+        : []);
 }
 function collectRegionLayerWarnings(markers, regionLayerSequences) {
     const warnings = [];

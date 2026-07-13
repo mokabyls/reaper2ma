@@ -455,6 +455,9 @@ function compareTimecodeMacroEvents(left, right) {
     return left.sourceOrder - right.sourceOrder;
 }
 function createPageAssignmentCommands(settings, tempDataPoolName, sequences) {
+    if (settings.assignExecutors === false) {
+        return [];
+    }
     const executorOffsets = {
         main: 0,
         bump: 0,
@@ -477,6 +480,7 @@ function createBpmCueName(bpmText) {
 export function generateMacroXML(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence, filename) {
     const tempDataPoolName = createTempDataPoolName(filename);
     const sequences = createGeneratedSequences(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
+    const shouldAssignExecutors = settings.assignExecutors !== false;
     const timecodeCommands = createTimecodeCommands(settings, tempDataPoolName, filename, sequences, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
     const firstFinalSequenceNumber = sequences[0]?.finalSequenceNumber;
     const obj = {
@@ -498,7 +502,7 @@ export function generateMacroXML(settings, uniqueCues, regionSequences, regionLa
                     ...(settings.exportMode === "cues-and-timecode" && sequences.length > 0
                         ? [createCommand(`Label DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1 ${quoteCommandValue(filename)}`)]
                         : []),
-                    createCommand(`Label Page ${settings.pageNumber} ${quoteCommandValue(filename)}`),
+                    ...(shouldAssignExecutors ? [createCommand(`Label Page ${settings.pageNumber} ${quoteCommandValue(filename)}`)] : []),
                     ...(firstFinalSequenceNumber !== undefined
                         ? [createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Sequence 1 Thru At Sequence ${firstFinalSequenceNumber}`)]
                         : []),

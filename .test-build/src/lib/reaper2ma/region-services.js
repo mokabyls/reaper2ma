@@ -1,4 +1,4 @@
-import { sanitizeMarkerName } from "./marker-parser.js";
+import { parseMarkerName, sanitizeMarkerName } from "./marker-parser.js";
 import { clampRegionEndPreRollMs, clampRegionLayerPreRollMs, DEFAULT_REGION_END_PRE_ROLL_MS, DEFAULT_REGION_LAYER_PRE_ROLL_ENABLED, DEFAULT_REGION_LAYER_PRE_ROLL_MS, } from "./settings.js";
 import { createInheritedRegionLayerColor } from "./colors.js";
 const REGION_START_CUE_NAME = "Region Start";
@@ -16,9 +16,10 @@ export function parseRegions(rows) {
         if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) {
             return undefined;
         }
+        const regionName = parseRegionName(row.Name);
         return {
             regionId: `R${index + 1}`,
-            regionLabel: row.Name.trim(),
+            regionLabel: regionName.displayName,
             start: row.Start,
             end: Number.isFinite(endValueFromEnd) ? row.End : String(endValue),
             color: row.Color,
@@ -26,9 +27,33 @@ export function parseRegions(rows) {
             startValue,
             endValue,
             lengthValue: endValue - startValue,
+            ...(regionName.bpm !== undefined && regionName.bpmText !== undefined
+                ? {
+                    bpm: regionName.bpm,
+                    bpmText: regionName.bpmText,
+                }
+                : {}),
         };
     })
         .filter((region) => region !== undefined);
+}
+function parseRegionName(name) {
+    const parsedName = parseMarkerName(name);
+    const hasBpmTag = parsedName.tags.some((tag) => tag.key.trim().toUpperCase() === "BPM");
+    if (!hasBpmTag) {
+        return {
+            displayName: name.trim(),
+        };
+    }
+    return {
+        displayName: parsedName.displayName,
+        ...(parsedName.bpm !== undefined && parsedName.bpmText !== undefined
+            ? {
+                bpm: parsedName.bpm,
+                bpmText: parsedName.bpmText,
+            }
+            : {}),
+    };
 }
 export function assignMarkersToRegions(markers, regions) {
     return markers.map((marker) => {

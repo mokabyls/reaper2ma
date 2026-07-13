@@ -225,19 +225,19 @@ export function groupBumpSequences(bumpMarkers, sequenceNumber, prefix, baseSequ
     }
     return bumpSequences;
 }
-export function createBpmSequence(bpmMarkers, sequenceNumber, repeatedSequenceCount) {
-    if (bpmMarkers.length === 0) {
+export function createBpmSequence(bpmSources, sequenceNumber, repeatedSequenceCount) {
+    if (bpmSources.length === 0) {
         return undefined;
     }
     return {
         displayName: "BPM",
         sequenceNumber: sequenceNumber + repeatedSequenceCount + 1,
         releaseDurationSeconds: DEFAULT_BPM_RELEASE_DURATION_SECONDS,
-        events: bpmMarkers.map((marker) => ({
-            displayName: marker.displayName,
-            timestamp: marker.start,
-            bpm: marker.bpm,
-            bpmText: marker.bpmText,
+        events: bpmSources.map((source) => ({
+            displayName: source.displayName,
+            timestamp: source.start,
+            bpm: source.bpm,
+            bpmText: source.bpmText,
         })),
     };
 }

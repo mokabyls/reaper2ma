@@ -2,6 +2,7 @@ import type {
     BumpSequence,
     BumpActionTag,
     AppearanceReference,
+    BpmSequenceSource,
     ConvertedMarker,
     CueTimingTag,
     RepeatedSequence,
@@ -298,11 +299,11 @@ export function groupBumpSequences(
 }
 
 export function createBpmSequence(
-    bpmMarkers: ConvertedMarker[],
+    bpmSources: BpmSequenceSource[],
     sequenceNumber: number,
     repeatedSequenceCount: number,
 ): BpmSequence | undefined {
-    if (bpmMarkers.length === 0) {
+    if (bpmSources.length === 0) {
         return undefined;
     }
 
@@ -310,11 +311,11 @@ export function createBpmSequence(
         displayName: "BPM",
         sequenceNumber: sequenceNumber + repeatedSequenceCount + 1,
         releaseDurationSeconds: DEFAULT_BPM_RELEASE_DURATION_SECONDS,
-        events: bpmMarkers.map((marker) => ({
-            displayName: marker.displayName,
-            timestamp: marker.start,
-            bpm: marker.bpm as number,
-            bpmText: marker.bpmText as string,
+        events: bpmSources.map((source) => ({
+            displayName: source.displayName,
+            timestamp: source.start,
+            bpm: source.bpm,
+            bpmText: source.bpmText,
         })),
     };
 }

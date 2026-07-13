@@ -1,7 +1,7 @@
 import { createAppearanceNameFromReaperColor, convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
 import { validateReaperCsvRows } from "./csv-validation.js";
-import { assignMarkersToRegions, buildRegionSequences, parseRegions } from "./region-services.js";
-import type { AppearanceReference, ConversionArtifacts, ConversionSettings, ConvertedMarker, ReaperRegionRow } from "./types.js";
+import { assignMarkersToRegions, buildRegionSequences, parseRegions, type ParsedRegion } from "./region-services.js";
+import type { AppearanceReference, BpmSequenceSource, ConversionArtifacts, ConversionSettings, ConvertedMarker, ReaperRegionRow } from "./types.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
 import {
     createBpmSequence,
@@ -84,8 +84,8 @@ function convertMarkersOnlyArtifacts(
     );
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
     const regionLayerWarnings = collectRegionLayerWarnings(normalizedMarkers, []);
-    const bpmMarkers = normalizedMarkers.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
-    const bpmSequence = createBpmSequence(bpmMarkers, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
+    const bpmSources = collectBpmMarkerSources(normalizedMarkers);
+    const bpmSequence = createBpmSequence(bpmSources, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
     const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], [], repeatedSequences, bumpSequences, bpmSequence);
     const macroXml = generateMacroXML(
         settings,
@@ -154,9 +154,9 @@ function convertHybridArtifacts(
     );
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
     const regionLayerWarnings = collectRegionLayerWarnings(markersWithRegions, regionLayerSequences);
-    const bpmMarkers = markersWithRegions.filter((marker) => marker.bpm !== undefined && marker.bpmText !== undefined);
+    const bpmSources = [...collectRegionBpmSources(regions), ...collectBpmMarkerSources(markersWithRegions)];
     const bpmSequence = createBpmSequence(
-        bpmMarkers,
+        bpmSources,
         settings.sequenceNumber,
         regionSequences.length + regionLayerSequences.length + repeatedSequences.length + bumpSequences.length,
     );
@@ -195,6 +195,36 @@ function convertHybridArtifacts(
 
 function collectBumpReleaseWarnings(bumpSequences: ConversionArtifacts["bumpSequences"]): string[] {
     return bumpSequences.flatMap((sequence) => sequence.releaseWarnings ?? []);
+}
+
+function collectBpmMarkerSources(markers: ConvertedMarker[]): BpmSequenceSource[] {
+    return markers.flatMap((marker): BpmSequenceSource[] =>
+        marker.bpm !== undefined && marker.bpmText !== undefined
+            ? [
+                  {
+                      displayName: marker.displayName,
+                      start: marker.start,
+                      bpm: marker.bpm,
+                      bpmText: marker.bpmText,
+                  },
+              ]
+            : [],
+    );
+}
+
+function collectRegionBpmSources(regions: ParsedRegion[]): BpmSequenceSource[] {
+    return regions.flatMap((region): BpmSequenceSource[] =>
+        region.bpm !== undefined && region.bpmText !== undefined
+            ? [
+                  {
+                      displayName: region.regionLabel,
+                      start: region.start,
+                      bpm: region.bpm,
+                      bpmText: region.bpmText,
+                  },
+              ]
+            : [],
+    );
 }
 
 function collectRegionLayerWarnings(markers: ConvertedMarker[], regionLayerSequences: ConversionArtifacts["regionLayerSequences"]): string[] {

@@ -1,4 +1,4 @@
-import { sanitizeMarkerName } from "./marker-parser.js";
+import { parseMarkerName, sanitizeMarkerName } from "./marker-parser.js";
 import {
     clampRegionEndPreRollMs,
     clampRegionLayerPreRollMs,
@@ -34,6 +34,8 @@ export type ParsedRegion = {
     startValue: number;
     endValue: number;
     lengthValue: number;
+    bpm?: number;
+    bpmText?: string;
 };
 
 export function parseRegions(rows: ReaperRegionRow[]): ParsedRegion[] {
@@ -48,9 +50,11 @@ export function parseRegions(rows: ReaperRegionRow[]): ParsedRegion[] {
                 return undefined;
             }
 
+            const regionName = parseRegionName(row.Name);
+
             return {
                 regionId: `R${index + 1}`,
-                regionLabel: row.Name.trim(),
+                regionLabel: regionName.displayName,
                 start: row.Start,
                 end: Number.isFinite(endValueFromEnd) ? row.End : String(endValue),
                 color: row.Color,
@@ -58,9 +62,40 @@ export function parseRegions(rows: ReaperRegionRow[]): ParsedRegion[] {
                 startValue,
                 endValue,
                 lengthValue: endValue - startValue,
+                ...(regionName.bpm !== undefined && regionName.bpmText !== undefined
+                    ? {
+                          bpm: regionName.bpm,
+                          bpmText: regionName.bpmText,
+                      }
+                    : {}),
             };
         })
         .filter((region): region is ParsedRegion => region !== undefined);
+}
+
+function parseRegionName(name: string): {
+    displayName: string;
+    bpm?: number;
+    bpmText?: string;
+} {
+    const parsedName = parseMarkerName(name);
+    const hasBpmTag = parsedName.tags.some((tag) => tag.key.trim().toUpperCase() === "BPM");
+
+    if (!hasBpmTag) {
+        return {
+            displayName: name.trim(),
+        };
+    }
+
+    return {
+        displayName: parsedName.displayName,
+        ...(parsedName.bpm !== undefined && parsedName.bpmText !== undefined
+            ? {
+                  bpm: parsedName.bpm,
+                  bpmText: parsedName.bpmText,
+              }
+            : {}),
+    };
 }
 
 export function assignMarkersToRegions(markers: ConvertedMarker[], regions: ParsedRegion[]): ConvertedMarker[] {

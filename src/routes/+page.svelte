@@ -47,6 +47,7 @@
     let pageNumber = 1;
     let pageSlotStart = 201;
     let bumpPageSlotStart = 101;
+    let assignExecutors = true;
     let cueStartNumber = 1;
     let regionEndPreRollMs = DEFAULT_REGION_END_PRE_ROLL_MS;
     let autoOffRegionLayers = DEFAULT_AUTO_OFF_REGION_LAYERS;
@@ -111,6 +112,7 @@
         pageNumber,
         pageSlotStart,
         bumpPageSlotStart,
+        assignExecutors,
         cueStartNumber,
         regionEndPreRollMs,
         autoOffRegionLayers,
@@ -169,6 +171,7 @@
         pageNumber: number;
         pageSlotStart: number;
         bumpPageSlotStart: number;
+        assignExecutors: boolean;
         cueStartNumber: number;
         regionEndPreRollMs: number;
         autoOffRegionLayers: boolean;
@@ -199,6 +202,7 @@
         pageNumber,
         pageSlotStart,
         bumpPageSlotStart,
+        assignExecutors,
         cueStartNumber,
         regionEndPreRollMs: clampRegionEndPreRollMs(regionEndPreRollMs),
         autoOffRegionLayers,
@@ -229,6 +233,7 @@
         pageNumber,
         pageSlotStart,
         bumpPageSlotStart,
+        assignExecutors,
         cueStartNumber,
         regionEndPreRollMs: clampRegionEndPreRollMs(regionEndPreRollMs),
         autoOffRegionLayers,
@@ -282,7 +287,7 @@
     $: timelineMinWidth = createTimelineMinWidth(timelinePreview?.durationSeconds ?? 0);
     $: selectedZipFileNames = getSelectedZipFileNames();
     $: resolvedSpeedMaster = resolveSpeedMaster(clampSpeedMasterNumber(speedMasterNumber));
-    $: executorPreviewRows = createExecutorPreviewRows(conversionArtifacts, pageNumber, pageSlotStart, bumpPageSlotStart);
+    $: executorPreviewRows = assignExecutors ? createExecutorPreviewRows(conversionArtifacts, pageNumber, pageSlotStart, bumpPageSlotStart) : [];
 
     const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -351,6 +356,7 @@
         pageNumber = readPersistedInteger(storedSettings.pageNumber, pageNumber, 1, 9999);
         pageSlotStart = readPersistedInteger(storedSettings.pageSlotStart, pageSlotStart, 101, 490);
         bumpPageSlotStart = readPersistedInteger(storedSettings.bumpPageSlotStart, bumpPageSlotStart, 101, 490);
+        assignExecutors = readPersistedBoolean(storedSettings.assignExecutors, assignExecutors);
         cueStartNumber = readPersistedInteger(storedSettings.cueStartNumber, cueStartNumber, 1, 9999);
         regionEndPreRollMs = readPersistedInteger(
             storedSettings.regionEndPreRollMs,
@@ -1353,28 +1359,36 @@
                         <input id="timecode-number" type="number" min="1" max="9999" step="1" bind:value={timecodeNumber} class="input" disabled={exportMode === "cues-only"} />
                     </div>
 
-                    <div class="input-group">
+                    <label class="macro-group-toggle advanced-toggle">
+                        <input type="checkbox" bind:checked={assignExecutors} class="macro-checkbox" />
+                        <span>
+                            <span class="label-text">Assign executors</span>
+                            <span class="label-hint">Emit Assign Sequence commands to Page {pageNumber}.XXX</span>
+                        </span>
+                    </label>
+
+                    <div class="input-group" class:disabled={!assignExecutors}>
                         <label for="page-number" class="label">
                             <span class="label-text">Page Number</span>
                             <span class="label-hint">grandMA3 executor page receiving generated sequences</span>
                         </label>
-                        <input id="page-number" type="number" min="1" max="9999" step="1" bind:value={pageNumber} class="input" />
+                        <input id="page-number" type="number" min="1" max="9999" step="1" bind:value={pageNumber} class="input" disabled={!assignExecutors} />
                     </div>
 
-                    <div class="input-group">
+                    <div class="input-group" class:disabled={!assignExecutors}>
                         <label for="page-slot-start" class="label">
                             <span class="label-text">Page Slot Start</span>
                             <span class="label-hint">First executor for main, region and repeated sequences.</span>
                         </label>
-                        <input id="page-slot-start" type="number" min="101" max="490" step="1" bind:value={pageSlotStart} class="input" />
+                        <input id="page-slot-start" type="number" min="101" max="490" step="1" bind:value={pageSlotStart} class="input" disabled={!assignExecutors} />
                     </div>
 
-                    <div class="input-group">
+                    <div class="input-group" class:disabled={!assignExecutors}>
                         <label for="bump-page-slot-start" class="label">
                             <span class="label-text">Bump Page Slot Start</span>
                             <span class="label-hint">First executor for Temp/Flash bump buttons.</span>
                         </label>
-                        <input id="bump-page-slot-start" type="number" min="101" max="490" step="1" bind:value={bumpPageSlotStart} class="input" />
+                        <input id="bump-page-slot-start" type="number" min="101" max="490" step="1" bind:value={bumpPageSlotStart} class="input" disabled={!assignExecutors} />
                     </div>
                 </div>
 
@@ -1439,7 +1453,7 @@
                         <div>
                             <span class="ma-info-label">Speed</span>
                             <strong>Master {resolvedSpeedMaster}</strong>
-                            <p>All generated sequences use SpeedMaster {resolvedSpeedMaster}; BPM markers drive this same master.</p>
+                            <p>All generated sequences use SpeedMaster {resolvedSpeedMaster}; BPM tags drive this same master.</p>
                         </div>
                     </div>
 
@@ -1461,8 +1475,10 @@
                                     </div>
                                 {/each}
                             </div>
-                        {:else}
+                        {:else if assignExecutors}
                             <p class="inline-empty">Upload a CSV to preview generated executor assignments.</p>
+                        {:else}
+                            <p class="inline-empty">Executor assignment is disabled.</p>
                         {/if}
                     </div>
                 </div>
@@ -1631,7 +1647,7 @@
                             <strong>{conversionPreview.duration}s</strong>
                         </article>
                         <article class="summary-stat">
-                            <span class="summary-stat-label">BPM markers</span>
+                            <span class="summary-stat-label">BPM events</span>
                             <strong>{conversionPreview.bpmEventCount}</strong>
                         </article>
                     </div>
@@ -2000,7 +2016,7 @@
                                 </table>
                             </div>
                         {:else}
-                            <p class="inline-empty">No sequence will be assigned to an executor.</p>
+                            <p class="inline-empty">{assignExecutors ? "No sequence will be assigned to an executor." : "Executor assignment is disabled."}</p>
                         {/if}
                     </div>
 
@@ -2215,9 +2231,9 @@
                         <p><code>Fade</code> and <code>Delay</code> modifiers are emitted on the cue macro line.</p>
                     </div>
                     <div class="usage-item">
-                        <div class="usage-title">BPM markers</div>
+                        <div class="usage-title">BPM tags</div>
                         <code>[BPM_129.5] Chorus</code>
-                        <p>Creates a dedicated BPM sequence and drives the configured Speed Master.</p>
+                        <p>Use on a marker or region name to create a dedicated BPM sequence and drive the configured Speed Master.</p>
                     </div>
                     <div class="usage-item">
                         <div class="usage-title">Execution token</div>

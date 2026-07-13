@@ -178,6 +178,13 @@ export type BpmSequenceEvent = {
     bpmText: string;
 };
 
+export type BpmSequenceSource = {
+    displayName: string;
+    start: string;
+    bpm: number;
+    bpmText: string;
+};
+
 export type BpmSequence = {
     displayName: string;
     events: BpmSequenceEvent[];
@@ -194,6 +201,7 @@ export type ConversionSettings = {
     pageNumber: number;
     pageSlotStart: number;
     bumpPageSlotStart: number;
+    assignExecutors: boolean;
     cueStartNumber: number;
     regionEndPreRollMs: number;
     autoOffRegionLayers: boolean;

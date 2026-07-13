@@ -115,7 +115,7 @@ The page has one primary workflow:
 17. Bump markers can carry release metadata through `Release_...`, `TempRelease`, or `FlashRelease`; the generator uses it to configure a timed `OffCue`, defaulting to 0.2 seconds when no release is found.
 18. In hybrid mode, a non-global bump marker with a containing or explicitly targeted region becomes region-scoped. Its bump sequence is named from the region, belongs to that region's timecode track group, and is grouped separately from bumps in other regions even when the marker name and color match. A `[GLOBAL]` bump remains in the global timecode group.
 19. In hybrid mode, an uncolored bump marker with a containing or explicitly targeted region inherits the readable region color lightened by 42%. That effective color is used for bump grouping, grandMA3 appearances, and timeline colors. Explicit bump marker colors still win and are not lightened.
-20. Markers carrying `BPM_...` tags become a dedicated BPM sequence.
+20. Markers and region rows carrying `BPM_...` tags become events in a dedicated BPM sequence. A region BPM event is placed at the region `Start`, and the BPM tag is removed from the generated region label.
 21. Macro XML is always generated and included in the final ZIP archive.
 22. In `cues-and-timecode` mode, the macro also creates the grandMA timecode, track groups, tracks, events, and cue assignments by command lines.
 23. The Summary step is review-only and sends the user to Extras before download.
@@ -131,6 +131,7 @@ The default settings are:
 - `pageNumber = 1`
 - `pageSlotStart = 201`
 - `bumpPageSlotStart = 101`
+- `assignExecutors = true`
 - `cueStartNumber = 1`
 - `regionEndPreRollMs = 750`
 - `autoOffRegionLayers = true`
@@ -143,8 +144,8 @@ The default settings are:
 
 The two export modes affect the main macro XML inside the timestamped ZIP:
 
-- `cues-and-timecode` - ZIP contains `<filename>_macro.xml`; macro creates sequences, cues, appearances, page assignments, the timecode object, tracks, command events, and cue-to-event assignments.
-- `cues-only` - ZIP contains `<filename>_macro.xml`; macro creates sequences, cues, appearances, and page assignments but omits timecode commands.
+- `cues-and-timecode` - ZIP contains `<filename>_macro.xml`; macro creates sequences, cues, appearances, optional page assignments, the timecode object, tracks, command events, and cue-to-event assignments.
+- `cues-only` - ZIP contains `<filename>_macro.xml`; macro creates sequences, cues, appearances, and optional page assignments but omits timecode commands.
 
 The ZIP filename is `<filename>_<YYYYMMDD-HHmmss>.zip`, uses uncompressed ZIP entries, and stores all XML files at the archive root.
 
@@ -283,12 +284,12 @@ Macro specifics:
 - Every created sequence gets the configured Speed Master assignment.
 - If the base sequence has no unique cues, base-sequence macro lines are skipped to avoid `Cue 1 thru 0`.
 - In hybrid mode, region sequences are stored like regular sequences. They receive `Region Start` and `Region End` cues at the Reaper region boundaries, and their marker cues get labeled, timed, and optionally assigned appearances. `Region End` timecode events use the configured pre-roll, defaulting to 750 ms before the region end when there is no marker in that final window. Boundary cues merge into matching markers instead of creating duplicate cues, for example `Region End + Marker Name`.
-- Region layer sequences are stored immediately after their parent region sequence, named like `R2 - Chorus - FX`, assigned to normal page executors, and receive one cue per layer marker with optional cue appearance, `CueFade`, and cue timing modifiers. When enabled, each layer sequence starts with a `Layer Pre-Roll` cue/event before the first layer cue. Uncolored layer markers in readable colored regions inherit the 24% lightened region appearance; explicit marker colors override it. Manual and automatic Off behavior is emitted as derived timecode events on the layer tracks, not as extra layer cues.
+- Region layer sequences are stored immediately after their parent region sequence, named like `R2 - Chorus - FX`, optionally assigned to normal page executors, and receive one cue per layer marker with optional cue appearance, `CueFade`, and cue timing modifiers. When enabled, each layer sequence starts with a `Layer Pre-Roll` cue/event before the first layer cue. Uncolored layer markers in readable colored regions inherit the 24% lightened region appearance; explicit marker colors override it. Manual and automatic Off behavior is emitted as derived timecode events on the layer tracks, not as extra layer cues.
 - Repeated sequences get appearances created with `Store Appearance {id}`, `Label Appearance {id} "{name}"`, `Set Appearance {id} COLOR="1,1,1,0" BackR={0..255} BackG={0..255} BackB={0..255} BackAlpha=221`, then `Set DataPool "{temp}" Sequence {local} APPEARANCE="{name}"`.
 - Cue-level appearances use `Set DataPool "{temp}" Sequence {local} Cue {cueNumber} APPEARANCE="{name}"`.
-- BPM markers create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Temp`; a timed `OffCue` handles the 0.5 second release.
-- Main, region, region layer, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}`.
-- Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}`, defaulting to the 100 executor row for button-style Temp/Flash playbacks. Non-global bump markers in regions are region-scoped, named from their region, and placed in that region's timecode track group. Uncolored bump markers in readable colored regions inherit the 42% lightened region color for grouping, sequence/cue appearance, and timeline preview.
+- BPM tags on markers or region names create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. Region BPM events fire at the region `Start`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Temp`; a timed `OffCue` handles the 0.5 second release.
+- Main, region, region layer, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}` when executor assignment is enabled.
+- Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}` when executor assignment is enabled, defaulting to the 100 executor row for button-style Temp/Flash playbacks. Non-global bump markers in regions are region-scoped, named from their region, and placed in that region's timecode track group. Uncolored bump markers in readable colored regions inherit the 42% lightened region color for grouping, sequence/cue appearance, and timeline preview.
 - grandMA3 executor rows are documented as 101-190 for button-only executors, 201-290 for button+fader executors, and 301-490 for button+knob executor rows. Hardware surfaces can expose fewer executor columns than the software range.
 - The macro finalizes with `Move DataPool "{temp}" Sequence 1 Thru At Sequence {firstFinalSequenceNumber}`, optional timecode move, and `Delete DataPool "{temp}" /NoConfirm`.
 
@@ -332,9 +333,9 @@ The UI is a single page with:
 
 - Header/title and subtitle.
 - Upload/drop zone.
-- Settings grid for sequence number, editable prefix, import/export mode selects, timecode number, page number, page slot start, and numeric Speed Master suffix.
+- Settings grid for sequence number, editable prefix, import/export mode selects, timecode number, executor assignment toggle, page number, page slot start, and numeric Speed Master suffix.
 - Import mode helper comparing `Markers only` and `Regions + markers`, including examples of flat marker cues versus region rows becoming generated sequences.
-- Separate live executor preview showing main, region, region layer, and repeated sequence assignments from `Page {pageNumber}.{pageSlotStart}` plus bump assignments from `Page {pageNumber}.{bumpPageSlotStart}`. BPM helper sequences are intentionally omitted from this executor preview.
+- Separate live executor preview showing main, region, region layer, and repeated sequence assignments from `Page {pageNumber}.{pageSlotStart}` plus bump assignments from `Page {pageNumber}.{bumpPageSlotStart}` when executor assignment is enabled. BPM helper sequences are intentionally omitted from this executor preview.
 - Collapsible advanced section for cue start number, region-end pre-roll, layer pre-roll, and automatic region layer Off.
 - Radio group for import mode and export mode.
 - Marker syntax help opened from the import step.

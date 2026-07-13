@@ -28,6 +28,7 @@ const baseSettings = {
     pageNumber: 1,
     pageSlotStart: 201,
     bumpPageSlotStart: 101,
+    assignExecutors: true,
     cueStartNumber: 1,
     regionEndPreRollMs: 750,
     autoOffRegionLayers: true,
@@ -1182,6 +1183,38 @@ R1,Empty Region,4,12,8,
         assert.equal(commands.includes('Label DataPool "R2MA emptyregion" Sequence 1 Cue 2 "Region End"'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA emptyregion" Sequence 1 Cue 2 At Timecode 1.1.1.1.1.2'), true);
     });
+    it("creates BPM events from BPM tags on region names", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,[BPM_129.5] Chorus,10,20,10,#00BFFF
+1,[BPM_120] Downbeat,12,,,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "region-bpm.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        const bpmTrackCommands = getTimecodeTrackCommands(commands, "R2MA regionbpm", 2);
+        assert.equal(artifacts.regionSequences[0].regionLabel, "Chorus");
+        assert.equal(artifacts.regionSequences[0].displayName, "MA R1 - Chorus");
+        assert.equal(artifacts.bpmSequence?.sequenceNumber, 9003);
+        assert.deepEqual(artifacts.bpmSequence?.events.map((event) => ({
+            displayName: event.displayName,
+            timestamp: event.timestamp,
+            bpmText: event.bpmText,
+        })), [
+            { displayName: "Chorus", timestamp: "10", bpmText: "129.5" },
+            { displayName: "Downbeat", timestamp: "12", bpmText: "120" },
+        ]);
+        assert.equal(commands.includes('Store DataPool "R2MA regionbpm" Sequence 1 "MA R1 - Chorus"'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA regionbpm" Sequence 2 "MA BPM"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA regionbpm" Sequence 2 Cue 1 "BPM 129.5"'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA regionbpm" Sequence 2 Cue 2 "BPM 120"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA regionbpm" Sequence 2 Cue 1 Property "Command" "Master 3.4 At BPM 129.5"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TIME" "10"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 2 "TIME" "12"'), true);
+        assert.equal(artifacts.macroXml.includes("BPM_129.5"), false);
+    });
     it("calculates timecode duration from the latest generated event", () => {
         const csv = `#,Name,Start,End,Length,Color
 R1,Region A,10,20,10,
@@ -1647,6 +1680,21 @@ R2,Region Two,5,10,5,
         assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 2 At Page 1.202'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 3 At Page 1.111'), true);
         assert.equal(commands.includes('Assign DataPool "R2MA bumpcustom" Sequence 4 At Page 1.112'), true);
+    });
+    it("can omit executor page assignments from the generated macro", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,0,
+2,[Temp] HIT,1,19005190
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "no-executors.csv", {
+            ...baseSettings,
+            assignExecutors: false,
+        });
+        const commands = getMacroCommands(artifacts.macroXml);
+        assert.equal(commands.some((command) => command.includes(" At Page ")), false);
+        assert.equal(commands.some((command) => command.startsWith("Label Page ")), false);
+        assert.equal(commands.includes('Move DataPool "R2MA noexecutors" Sequence 1 Thru At Sequence 9001'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA noexecutors" Sequence 1 Cue 1 At Timecode 1.1.1.1.1.1'), true);
     });
     it("emits timed OffCue setup from inline, paired, fallback and Flash release tags", () => {
         const inlineCsv = `#,Name,Start,Color

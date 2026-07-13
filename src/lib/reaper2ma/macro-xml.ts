@@ -710,6 +710,10 @@ function compareTimecodeMacroEvents(left: TimecodeMacroEvent, right: TimecodeMac
 }
 
 function createPageAssignmentCommands(settings: ConversionSettings, tempDataPoolName: string, sequences: GeneratedSequence[]): MacroLine[] {
+    if (settings.assignExecutors === false) {
+        return [];
+    }
+
     const executorOffsets: Record<ExecutorSlotGroup, number> = {
         main: 0,
         bump: 0,
@@ -748,6 +752,7 @@ export function generateMacroXML(
 ): string {
     const tempDataPoolName = createTempDataPoolName(filename);
     const sequences = createGeneratedSequences(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
+    const shouldAssignExecutors = settings.assignExecutors !== false;
     const timecodeCommands = createTimecodeCommands(
         settings,
         tempDataPoolName,
@@ -780,7 +785,7 @@ export function generateMacroXML(
                     ...(settings.exportMode === "cues-and-timecode" && sequences.length > 0
                         ? [createCommand(`Label DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1 ${quoteCommandValue(filename)}`)]
                         : []),
-                    createCommand(`Label Page ${settings.pageNumber} ${quoteCommandValue(filename)}`),
+                    ...(shouldAssignExecutors ? [createCommand(`Label Page ${settings.pageNumber} ${quoteCommandValue(filename)}`)] : []),
                     ...(firstFinalSequenceNumber !== undefined
                         ? [createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Sequence 1 Thru At Sequence ${firstFinalSequenceNumber}`)]
                         : []),

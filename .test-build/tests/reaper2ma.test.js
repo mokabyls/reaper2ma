@@ -481,6 +481,7 @@ describe("conversion artifacts", () => {
         assert.equal(commands.includes('Assign DataPool "R2MA songcsv" Sequence 1 At Page 1.201'), true);
         assert.equal(commands.includes('Move DataPool "R2MA songcsv" Sequence 1 Thru At Sequence 9001'), true);
         assert.equal(commands.includes('Move DataPool "R2MA songcsv" Timecode 1 Thru At Timecode 1'), true);
+        assert.equal(commands.includes('Set Timecode 1 Property "PlaybackAndRecord" "Manual Events"'), true);
         assert.equal(commands.includes('Delete DataPool "R2MA songcsv" /NoConfirm'), true);
         assert.equal(artifacts.macroXml.includes("GMA3.Timecode"), false);
         assert.equal(artifacts.macroXml.includes("RealtimeCmd"), false);
@@ -564,7 +565,7 @@ R1,Region A,0,5,5,#00BFFF
             token: event.token,
             label: event.label,
             isDerived: event.isDerived,
-        })), [{ timestamp: "9", token: "Temp", label: "BPM 120", isDerived: false }]);
+        })), [{ timestamp: "9", token: "Go+", label: "BPM 120", isDerived: false }]);
     });
     it("routes compact region action tags into the target timeline tracks", () => {
         const csv = `#,Name,Start,End,Length,Color
@@ -1211,7 +1212,8 @@ R1,[BPM_129.5] Chorus,10,20,10,#00BFFF
         assert.equal(commands.includes('Label DataPool "R2MA regionbpm" Sequence 2 Cue 2 "BPM 120"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA regionbpm" Sequence 2 Cue 1 Property "Command" "Master 3.4 At BPM 129.5"'), true);
         assert.equal(bpmTrackCommands.includes('Set 1 "TIME" "10"'), true);
-        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Go+"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Temp"'), false);
         assert.equal(bpmTrackCommands.includes('Set 2 "TIME" "12"'), true);
         assert.equal(artifacts.macroXml.includes("BPM_129.5"), false);
     });
@@ -1584,11 +1586,12 @@ R2,Region Two,5,10,5,
         const bpmTrackEnd = commands.indexOf("cd root", bpmTrackStart + 1);
         const bpmTrackCommands = commands.slice(bpmTrackStart, bpmTrackEnd);
         assert.notEqual(bpmTrackStart, -1);
-        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Temp"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Go+"'), true);
         assert.equal(bpmTrackCommands.includes('Set 2 "TIME" "2"'), true);
-        assert.equal(bpmTrackCommands.includes('Set 2 "TOKEN" "Temp"'), true);
+        assert.equal(bpmTrackCommands.includes('Set 2 "TOKEN" "Go+"'), true);
         assert.equal(bpmTrackCommands.some((command) => command.includes("TempRelease")), false);
-        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Go+"'), false);
+        assert.equal(bpmTrackCommands.includes('Set 1 "TOKEN" "Temp"'), false);
+        assert.equal(bpmTrackCommands.includes('Set 2 "TOKEN" "Temp"'), false);
     });
     it("applies cue fade commands to unique, repeated and bump cues", () => {
         const csv = `#,Name,Start,Color

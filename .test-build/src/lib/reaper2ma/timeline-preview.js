@@ -169,7 +169,7 @@ function createTimelineTracks(artifacts, settings) {
             const cueName = `BPM ${event.bpmText}`;
             addTimelineEvent(track, {
                 timestamp: event.timestamp,
-                token: "Temp",
+                token: "Go+",
                 cueNumber,
                 cueName,
                 label: cueName,

@@ -275,7 +275,7 @@ function createTimelineTracks(artifacts: ConversionArtifacts, settings: Conversi
 
             addTimelineEvent(track, {
                 timestamp: event.timestamp,
-                token: "Temp",
+                token: "Go+",
                 cueNumber,
                 cueName,
                 label: cueName,

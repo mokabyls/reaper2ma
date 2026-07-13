@@ -220,7 +220,7 @@ function createGeneratedSequences(settings, uniqueCues, regionSequences, regionL
                 const cueName = createBpmCueName(event.bpmText);
                 return {
                     timestamp: event.timestamp,
-                    execToken: "Temp",
+                    execToken: "Go+",
                     cueNumber,
                     cueName,
                 };
@@ -507,7 +507,10 @@ export function generateMacroXML(settings, uniqueCues, regionSequences, regionLa
                         ? [createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Sequence 1 Thru At Sequence ${firstFinalSequenceNumber}`)]
                         : []),
                     ...(settings.exportMode === "cues-and-timecode" && sequences.length > 0
-                        ? [createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1 Thru At Timecode ${settings.timecodeNumber}`)]
+                        ? [
+                            createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1 Thru At Timecode ${settings.timecodeNumber}`),
+                            createCommand(`Set Timecode ${settings.timecodeNumber} Property ${quoteCommandValue("PlaybackAndRecord")} ${quoteCommandValue("Manual Events")}`),
+                        ]
                         : []),
                     createCommand(`Delete DataPool ${quoteCommandValue(tempDataPoolName)} /NoConfirm`),
                 ],

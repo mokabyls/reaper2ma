@@ -163,6 +163,50 @@ function createCueTimingCommands(tempDataPoolName: string, sequence: GeneratedSe
     });
 }
 
+function createCuePartCommands(tempDataPoolName: string, sequence: GeneratedSequence): MacroLine[] {
+    return sequence.cues.flatMap((cue) => {
+        const cueParts = cue.cueParts ?? [];
+
+        if (cueParts.length === 0) {
+            return [];
+        }
+
+        return [
+            createCommand(
+                `Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Property "AllowDuplicates" "Yes"`,
+            ),
+            ...cueParts.flatMap((part) => [
+                createCommand(
+                    `Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber}`,
+                ),
+                createCommand(
+                    `Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber}.1`,
+                ),
+                createCommand(
+                    `Label DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber} ${quoteCommandValue(part.name)}`,
+                ),
+                createCommand(
+                    `Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber} Property "CueDelay" ${quoteCommandValue(part.cueDelay)}`,
+                ),
+                ...(part.cueFade !== undefined
+                    ? [
+                          createCommand(
+                              `Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber} Property "CueFade" ${quoteCommandValue(part.cueFade)}`,
+                          ),
+                      ]
+                    : []),
+                ...(part.cueTiming?.length
+                    ? [
+                          createCommand(
+                              `Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber}.1 ${formatCueTimingModifiers(part.cueTiming)}`,
+                          ),
+                      ]
+                    : []),
+            ]),
+        ];
+    });
+}
+
 function createCueCommandCommands(tempDataPoolName: string, sequence: GeneratedSequence): MacroLine[] {
     return sequence.cues.flatMap((cue) =>
         (cue.commands ?? []).map((command) =>
@@ -225,6 +269,7 @@ function createSequenceSetupCommands(tempDataPoolName: string, settings: Convers
         createSequenceLabelCommand(tempDataPoolName, sequence),
         createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} ${cueRange} /Merge`),
         createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} ${cueRange} Part 0.1`),
+        ...createCuePartCommands(tempDataPoolName, sequence),
         createSpeedMasterCommand(tempDataPoolName, sequence, settings.speedMaster),
         ...createSequenceAppearanceAssignmentCommands(tempDataPoolName, sequence),
         ...createCueLabelCommands(tempDataPoolName, sequence),
@@ -280,6 +325,7 @@ function createGeneratedSequences(
             name: cue.cueName,
             ...(cue.cueFade !== undefined ? { cueFade: cue.cueFade } : {}),
             ...(cue.cueTiming !== undefined ? { cueTiming: cue.cueTiming } : {}),
+            ...(cue.cueParts?.length ? { cueParts: cue.cueParts } : {}),
         }));
         const events: SequenceTrigger[] = cuePlan.map((cue, index) => ({
             timestamp: cue.start,

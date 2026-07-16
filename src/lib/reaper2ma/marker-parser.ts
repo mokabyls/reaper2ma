@@ -38,6 +38,7 @@ type ParsedMarkerName = {
     bpm?: number;
     bpmText?: string;
     cueFade?: string;
+    isCuePart?: boolean;
 };
 
 export type ParsedReaperMarkerCsv = {
@@ -64,11 +65,13 @@ export function parseMarkerName(name: string): ParsedMarkerName {
     const isGlobal = tags.some(isGlobalScopeTag);
     const execToken = suffixExecToken ?? normalizeExecutionToken(headExecParts.join("|")) ?? "Go+";
     const bumpAction = parseBumpAction(execToken, tags);
+    const isCuePart = tags.some((tag) => tag.key.trim().toUpperCase() === "PART" && tag.value === null);
 
     return {
         displayName,
         execToken,
         tags,
+        ...(isCuePart ? { isCuePart } : {}),
         ...(isGlobal ? { isGlobal } : {}),
         ...(bumpAction ? { bumpAction } : {}),
         ...(regionTargetId ? { regionTargetId } : {}),
@@ -157,6 +160,7 @@ export function normalizeMarkerRows(rows: ReaperMarkerRow[]): ConvertedMarker[] 
             displayName: marker.displayName,
             execToken: marker.execToken,
             tags: markerTags,
+            ...(marker.isCuePart ? { isCuePart: marker.isCuePart } : {}),
             ...(marker.isGlobal ? { isGlobal: marker.isGlobal } : {}),
             ...(marker.bumpAction ? { bumpAction: marker.bumpAction } : {}),
             ...(marker.regionTargetId ? { regionTargetId: marker.regionTargetId } : {}),

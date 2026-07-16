@@ -138,6 +138,18 @@ describe("marker normalization", () => {
     });
 
     it("parses leading metadata tags and trailing execution tokens together", () => {
+        assert.deepEqual(parseMarkerName("[PART|CueFade_0.2|FadeFromX_0.1] Dimmer Off"), {
+            displayName: "Dimmer Off",
+            execToken: "Go+",
+            tags: [
+                { key: "PART", value: null },
+                { key: "CUEFADE", value: "0.2" },
+                { key: "FADEFROMX", value: "0.1" },
+            ],
+            isCuePart: true,
+            cueTiming: [{ key: "FadeFromX", value: "0.1" }],
+            cueFade: "0.2",
+        });
         assert.deepEqual(parseMarkerName("[BPM_129.5|X_foo|Temp] Intro"), {
             displayName: "Intro",
             execToken: "Temp",
@@ -2033,6 +2045,93 @@ R2,Region Two,5,10,5,
         assert.equal(artifacts.validationWarnings.some((warning) => warning.includes("multiple release durations")), true);
         assert.equal(commands.includes('Set DataPool "R2MA conflict" Sequence 1.OffCue Property "TrigTime" "0.25"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA conflict" Sequence 1.OffCue Property "TrigTime" "0.75"'), false);
+    });
+
+    it("creates delayed Cue Parts without adding cues or timecode events", () => {
+        const csv = `#,Name,Start,Color
+1,Intro,10,
+2,[PART|CueFade_0.2|FadeFromX_0.1] Dimmer Off,10.5,
+3,[PART] Snap Off,10.5,
+4,Verse,12,
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "cue-parts.csv", baseSettings);
+        const commands = getMacroCommands(artifacts.macroXml);
+        const introParts = artifacts.uniqueCues[0].cueParts;
+
+        assert.equal(artifacts.uniqueCues.length, 2);
+        assert.deepEqual(introParts, [
+            {
+                partNumber: 1,
+                name: "Dimmer Off",
+                sourceTimestamp: "10.5",
+                cueDelay: "0.5",
+                cueFade: "0.2",
+                cueTiming: [{ key: "FadeFromX", value: "0.1" }],
+            },
+            {
+                partNumber: 2,
+                name: "Snap Off",
+                sourceTimestamp: "10.5",
+                cueDelay: "0.5",
+            },
+        ]);
+        assert.equal(commands.filter((command) => command.includes('Property "AllowDuplicates" "Yes"')).length, 1);
+        assert.equal(commands.includes('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1.1'), true);
+        assert.equal(commands.includes('Label DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 "Dimmer Off"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 Property "CueDelay" "0.5"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 Property "CueFade" "0.2"'), true);
+        assert.equal(commands.includes('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1.1 FadeFromX "0.1"'), true);
+        assert.equal(commands.some((command) => command.includes('Part 2 Property "CueFade"')), false);
+        assert.equal(commands.some((command) => command === 'Set 2 "TIME" "10.5"'), false);
+
+        const allowIndex = commands.indexOf('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Property "AllowDuplicates" "Yes"');
+        const partIndex = commands.indexOf('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1');
+        assert.equal(allowIndex >= 0 && allowIndex < partIndex, true);
+    });
+
+    it("routes Cue Parts to region, layer, repeated and bump cues", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Verse,0,10,10,#00BFFF
+1,Region Cue,1,,,
+2,[PART] Region Off,1.25,,,
+3,[LAYER=FX] Layer Cue,2,,,
+4,[LAYER=FX|PART] Layer Off,2.4,,,
+5,Repeated,11,,,19005190
+6,[PART] Repeated Off,11.3,,,19005190
+7,Repeated,12,,,19005190
+8,[Temp] Hit,13,,,33554431
+9,[Temp|PART] Hit Off,13.15,,,33554431
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "routed-parts.csv", {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+        });
+
+        assert.equal(artifacts.regionSequences[0].cues.find((cue) => cue.name === "Region Cue")?.cueParts?.[0].cueDelay, "0.25");
+        assert.equal(artifacts.regionLayerSequences[0].cues.find((cue) => cue.name === "Layer Cue")?.cueParts?.[0].cueDelay, "0.4");
+        assert.equal(artifacts.repeatedSequences[0].events.length, 2);
+        assert.equal(artifacts.repeatedSequences[0].cues[0].cueParts?.[0].cueDelay, "0.3");
+        assert.equal(artifacts.bumpSequences[0].events.length, 1);
+        assert.equal(artifacts.bumpSequences[0].cues[0].cueParts?.[0].cueDelay, "0.15");
+    });
+
+    it("warns and ignores orphaned or incompatible Cue Part markers", () => {
+        const csv = `#,Name,Start,Color
+1,[PART] Orphan,0,
+2,Intro,1,
+3,[PART|BPM_120] Invalid BPM Part,1.5,
+4,[Temp|PART|Release_250] Invalid Release Part,2,19005190
+`;
+        const artifacts = convertReaperCsvToArtifacts(csv, "invalid-parts.csv", baseSettings);
+
+        assert.equal(artifacts.uniqueCues.length, 1);
+        assert.equal(artifacts.uniqueCues[0].cueParts, undefined);
+        assert.equal(artifacts.bumpSequences.length, 0);
+        assert.equal(artifacts.bpmSequence, undefined);
+        assert.equal(artifacts.validationWarnings.some((warning) => warning.includes("has no previous cue")), true);
+        assert.equal(artifacts.validationWarnings.some((warning) => warning.includes("BPM metadata")), true);
+        assert.equal(artifacts.validationWarnings.some((warning) => warning.includes("bump release metadata")), true);
     });
 
     it("warns when the main sequence is empty", () => {

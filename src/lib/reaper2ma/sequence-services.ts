@@ -222,6 +222,7 @@ export function groupBumpSequences(
             const appearanceReference = effectiveColor ? resolveAppearance?.(effectiveColor) : undefined;
             const bumpSequence: BumpSequence = {
                 color: effectiveColor,
+                sourceName: marker.displayName,
                 displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
                 ...(regionScope
                     ? {
@@ -399,7 +400,7 @@ function isBumpReleaseExecutionToken(execToken: string): boolean {
         .some((part) => part === "temprelease" || part === "flashrelease");
 }
 
-function resolveBumpMarkerColor(marker: ConvertedMarker): string {
+export function resolveBumpMarkerColor(marker: ConvertedMarker): string {
     if (marker.color.trim()) {
         return marker.color;
     }

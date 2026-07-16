@@ -1,4 +1,5 @@
 import { createAppearanceNameFromReaperColor, convertReaperColorToGrandmaAppearanceColor } from "./colors.js";
+import { attachCuePartMarkers, splitCuePartMarkers } from "./cue-parts.js";
 import { validateReaperCsvRows } from "./csv-validation.js";
 import { assignMarkersToRegions, buildRegionSequences, parseRegions, type ParsedRegion } from "./region-services.js";
 import type { AppearanceReference, BpmSequenceSource, ConversionArtifacts, ConversionSettings, ConvertedMarker, ReaperRegionRow } from "./types.js";
@@ -66,7 +67,8 @@ function convertMarkersOnlyArtifacts(
     appearanceRegistry: ReturnType<typeof createAppearanceRegistry>,
     validationWarnings: string[],
 ): ConversionArtifacts {
-    const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(normalizedMarkers);
+    const { contentMarkers } = splitCuePartMarkers(normalizedMarkers);
+    const { uniqueCues, repeatedMarkers, bumpMarkers } = splitMarkerRows(contentMarkers);
     const repeatedSequences = groupRepeatedSequences(
         repeatedMarkers,
         settings.prefix,
@@ -83,8 +85,17 @@ function convertMarkersOnlyArtifacts(
         appearanceRegistry.resolveAppearance,
     );
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
-    const regionLayerWarnings = collectRegionLayerWarnings(normalizedMarkers, []);
-    const bpmSources = collectBpmMarkerSources(normalizedMarkers);
+    const regionLayerWarnings = collectRegionLayerWarnings(contentMarkers, []);
+    const cuePartWarnings = attachCuePartMarkers(
+        normalizedMarkers,
+        uniqueCues,
+        [],
+        [],
+        repeatedSequences,
+        bumpSequences,
+        settings.importMode ?? "markers-only",
+    );
+    const bpmSources = collectBpmMarkerSources(contentMarkers);
     const bpmSequence = createBpmSequence(bpmSources, settings.sequenceNumber, repeatedSequences.length + bumpSequences.length);
     const prefixed = prefixGeneratedSequences(settings.sequenceNamePrefix, [], [], repeatedSequences, bumpSequences, bpmSequence);
     const macroXml = generateMacroXML(
@@ -101,7 +112,7 @@ function convertMarkersOnlyArtifacts(
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
-        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...bumpReleaseWarnings],
+        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...cuePartWarnings, ...bumpReleaseWarnings],
         regionSequences: prefixed.regionSequences,
         regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,
@@ -122,13 +133,14 @@ function convertHybridArtifacts(
 ): ConversionArtifacts {
     const regions = parseRegions(regionRows);
     const markersWithRegions = assignMarkersToRegions(normalizedMarkers, regions);
-    const outsideRegionMarkers = markersWithRegions.filter((marker) => !marker.regionId);
+    const { contentMarkers } = splitCuePartMarkers(markersWithRegions);
+    const outsideRegionMarkers = contentMarkers.filter((marker) => !marker.regionId);
     const {
         regionSequences,
         regionLayerSequences,
         nextSequenceNumber: nextSequenceAfterRegionsAndLayers,
     } = buildRegionSequences(
-        markersWithRegions,
+        contentMarkers,
         regions,
         settings.sequenceNumber,
         appearanceRegistry.resolveAppearance,
@@ -153,8 +165,17 @@ function convertHybridArtifacts(
         appearanceRegistry.resolveAppearance,
     );
     const bumpReleaseWarnings = collectBumpReleaseWarnings(bumpSequences);
-    const regionLayerWarnings = collectRegionLayerWarnings(markersWithRegions, regionLayerSequences);
-    const bpmSources = [...collectRegionBpmSources(regions), ...collectBpmMarkerSources(markersWithRegions)];
+    const regionLayerWarnings = collectRegionLayerWarnings(contentMarkers, regionLayerSequences);
+    const cuePartWarnings = attachCuePartMarkers(
+        markersWithRegions,
+        uniqueCues,
+        regionSequences,
+        regionLayerSequences,
+        repeatedSequences,
+        bumpSequences,
+        settings.importMode ?? "regions-and-markers",
+    );
+    const bpmSources = [...collectRegionBpmSources(regions), ...collectBpmMarkerSources(contentMarkers)];
     const bpmSequence = createBpmSequence(
         bpmSources,
         settings.sequenceNumber,
@@ -182,7 +203,7 @@ function convertHybridArtifacts(
     return {
         importMode: settings.importMode ?? "regions-and-markers",
         outputBaseName,
-        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...bumpReleaseWarnings],
+        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...cuePartWarnings, ...bumpReleaseWarnings],
         regionSequences: prefixed.regionSequences,
         regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,

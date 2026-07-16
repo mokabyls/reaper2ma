@@ -2231,6 +2231,11 @@
                         <p><code>Fade</code> and <code>Delay</code> modifiers are emitted on the cue macro line.</p>
                     </div>
                     <div class="usage-item">
+                        <div class="usage-title">Delayed Cue Parts</div>
+                        <code>[PART] Dimmer Off / [PART|CueFade_0.2] Dimmer Off</code>
+                        <p>Adds a recipe line in a new Cue Part on the previous cue. The marker gap becomes its <code>CueDelay</code>; use <code>[Temp|PART]</code> or <code>[Flash|PART]</code> for bump cues.</p>
+                    </div>
+                    <div class="usage-item">
                         <div class="usage-title">BPM tags</div>
                         <code>[BPM_129.5] Chorus</code>
                         <p>Use on a marker or region name to create a dedicated BPM sequence and drive the configured Speed Master.</p>

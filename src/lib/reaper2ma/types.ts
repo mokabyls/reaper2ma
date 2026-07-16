@@ -73,6 +73,7 @@ export type ConvertedMarker = {
     displayName: string;
     execToken: string;
     tags: MarkerTag[];
+    isCuePart?: boolean;
     isGlobal?: boolean;
     bumpAction?: BumpActionTag;
     regionActions?: RegionActionTag[];
@@ -90,6 +91,16 @@ export type ConvertedMarker = {
     bpmText?: string;
     cueFade?: string;
     cueTiming?: CueTimingTag[];
+    cueParts?: SequenceCuePart[];
+};
+
+export type SequenceCuePart = {
+    partNumber: number;
+    name: string;
+    sourceTimestamp: string;
+    cueDelay: string;
+    cueFade?: string;
+    cueTiming?: CueTimingTag[];
 };
 
 export type SequenceCue = {
@@ -101,6 +112,7 @@ export type SequenceCue = {
     commands?: string[];
     cueFade?: string;
     cueTiming?: CueTimingTag[];
+    cueParts?: SequenceCuePart[];
 };
 
 export type SequenceTrigger = {
@@ -158,6 +170,7 @@ export type RegionLayerSequence = {
 
 export type BumpSequence = {
     color: string;
+    sourceName: string;
     displayName: string;
     regionId?: string;
     regionLabel?: string;

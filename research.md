@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 macro XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds one grandMA3 macro XML file with `fast-xml-parser`. In `cues-and-timecode` mode, that macro creates the timecode, tracks, events, and cue assignments by grandMA commands instead of exporting a separate `GMA3.Timecode` XML object. Downloads are delivered as one timestamped ZIP archive that contains the main macro XML plus selected extra macro XML files.
+This repository is a compact SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 macro XML import files. The app runs entirely in the browser: a user uploads a CSV, the code parses marker rows, splits them into a master cue sequence, optional region-based sequences, repeated color-based effect sequences, bump overlays, and an optional BPM sequence, then builds one grandMA3 macro XML file with `fast-xml-parser`. In `cues-and-timecode` mode, that macro creates the timecode, tracks, events, and cue assignments by grandMA commands instead of exporting a separate `GMA3.Timecode` XML object. Downloads are delivered as one timestamped ZIP archive that contains the main macro XML plus selected extra macro XML files. The repository also ships a standalone Lua ReaScript that visualizes project markers as an eight-pad color chase inside REAPER.
 
 The core product logic now lives in `src/lib/reaper2ma/*` rather than the page component. There is a conversion library, XML generation helpers, and automated fixture tests. After installing locked dependencies with `pnpm install --frozen-lockfile`, both `pnpm check` and `pnpm build` pass.
 
@@ -29,6 +29,7 @@ Tracked source and configuration:
 - `src/app.d.ts` and `src/lib/index.ts` - Default SvelteKit placeholders.
 - `src/lib/assets/favicon.svg` - Favicon asset.
 - `static/robots.txt` - Allows crawling.
+- `reaper/Reaper2MA_Beat_Visualizer.lua` - Dependency-free REAPER Lua visualizer that flashes a reusable eight-pad grid at project markers.
 - `svelte.config.js` - SvelteKit static adapter and production base path.
 - `vite.config.ts` - SvelteKit Vite plugin.
 - `tsconfig.json` - Strict TypeScript configuration extending SvelteKit generated config.
@@ -375,6 +376,9 @@ The app is privacy-friendly by design:
 - It does not define server endpoints.
 - CSV parsing and XML generation happen locally in the browser.
 - Downloads are produced with `Blob` and object URLs.
+- The standalone beat visualizer reads the active project's transport,
+  markers, regions, names, and colors through REAPER's local API. It does not
+  write project state or send data over the network.
 
 Security considerations:
 
@@ -388,6 +392,9 @@ Commands run during this research:
 
 ```sh
 pnpm install --frozen-lockfile
+luac -p reaper/Reaper2MA_Beat_Visualizer.lua
+lua tests/reaper-beat-visualizer.test.lua
+pnpm test
 pnpm check
 pnpm build
 ```
@@ -397,6 +404,9 @@ Results:
 - Initial `pnpm check` and `pnpm build` failed because `node_modules` was missing.
 - Initial dependency install failed inside the network-restricted sandbox with DNS errors.
 - Re-running install with network approval succeeded from the lockfile.
+- The beat visualizer passed Lua syntax validation and its standalone test
+  suite, including a simulated REAPER runtime startup.
+- The existing converter test suite passed.
 - `pnpm check` passed with 0 errors and 0 warnings.
 - `pnpm build` passed and wrote static output to `build/`.
 

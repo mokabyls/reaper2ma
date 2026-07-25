@@ -17,6 +17,7 @@ Check out the link above. You can create your own Reaper project or use [this de
 -   Auto-Convert markers from csv to MA timecode
 -   Support for repeated and unique sequences / cues
 -   Generate standalone grandMA3 REAPER transport macro libraries
+-   Insert existing bump timecode events into a main sequence with the commented [grandMA3 bump-to-main plugin](./docs/grandma3-bump-to-main.md)
 -   Run a standalone eight-pad [REAPER beat visualizer](./docs/reaper-beat-visualizer.md)
 -   Web-based interface for easy access
 -   No software installation required

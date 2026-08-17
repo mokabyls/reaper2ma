@@ -1,7 +1,7 @@
 import { createConversionOutputFiles } from "./converter.js";
 import { createExampleMacroPresetOutputFiles } from "./macro-presets.js";
 import { createReaperTransportMacroOutputFile } from "./transport-macros.js";
-import type { ConversionArtifacts, ExampleMacroPresetSelection } from "./types.js";
+import type { ConversionArtifacts, ExampleMacroPresetSelection, GrandmaVersionProfile } from "./types.js";
 import type { ReaperMacroGeneratorOptions } from "./transport-macros.js";
 import type { ZipTextFile } from "./zip.js";
 
@@ -10,6 +10,8 @@ export type ExportBundleOptions = {
     sourceFileName: string;
     timecodeName: string;
     macroPresetSelection: ExampleMacroPresetSelection;
+    grandmaVersion?: GrandmaVersionProfile;
+    externalTimecodeSlot?: number;
     includeReaperTransportMacros: boolean;
     transportMacroOptions?: ReaperMacroGeneratorOptions;
 };
@@ -24,6 +26,8 @@ export function createExportBundleFiles(options: ExportBundleOptions): ZipTextFi
             sourceFileName: options.sourceFileName,
             timecodeName: options.timecodeName,
             selection: options.macroPresetSelection,
+            grandmaVersion: options.grandmaVersion,
+            externalTimecodeSlot: options.externalTimecodeSlot,
         }).map(({ name, content }) => ({
             name,
             content,

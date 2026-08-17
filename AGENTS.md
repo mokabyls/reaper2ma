@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-Reaper2MA is a SvelteKit static web app that converts Reaper marker CSV exports into grandMA3 macro and timecode XML files. It is intended for lighting/audio workflows where uncolored Reaper markers become a main grandMA3 cue stack, colored markers become repeated effect sequences, and `Temp` / `Flash` markers become bump overlays.
+Reaper2MA is a React + Vite static web app that converts Reaper marker CSV exports into grandMA3 macro and timecode XML files. It is intended for lighting/audio workflows where uncolored Reaper markers become a main grandMA3 cue stack, colored markers become repeated effect sequences, and `Temp` / `Flash` markers become bump overlays.
 
 Read `research.md` before making non-trivial changes. It documents the current conversion semantics, build/deploy setup, risks, and validation results.
 
@@ -11,7 +11,7 @@ Read `research.md` before making non-trivial changes. It documents the current c
 Use these repo-local skills when the task matches:
 
 - `skills/reaper2ma-conversion` - Use for CSV parsing, marker naming, unique/repeated cue grouping, sequence/cue numbering, and grandMA3 XML generation.
-- `skills/reaper2ma-frontend` - Use for SvelteKit UI, styling, static adapter behavior, assets, and deployment changes.
+- `skills/reaper2ma-frontend` - Use for React/Vite UI, styling, static behavior, assets, and deployment changes.
 
 These skills live in `skills/` because this workspace does not allow writing to a project `.codex/` directory.
 
@@ -26,18 +26,17 @@ pnpm build
 pnpm dev
 ```
 
-Run `pnpm check` after TypeScript/Svelte edits. Run `pnpm build` after changes that affect routing, SvelteKit config, static deployment, assets, or dependencies.
+Run `pnpm check` after TypeScript/React edits. Run `pnpm build` after changes that affect routing, Vite config, static deployment, assets, or dependencies.
 
 Do not rely on the current GitHub Actions workflow as proof of package-manager intent: it uses `yarn`, while the repo has `pnpm-lock.yaml` and README instructions use pnpm.
 
 ## Architecture notes
 
-- Main converter code is in `src/lib/reaper2ma/`; `src/routes/+page.svelte` handles the UI and wires user input to the converter.
+- Main converter code is in `src/lib/reaper2ma/`; `src/App.tsx` and `src/components/` handle the UI and wire user input to the converter.
 - Marker parsing and XML generation are split into smaller services and emitters behind `markers.ts` and `xml.ts` facades.
 - There is no backend. File parsing and XML generation happen in the browser.
-- `src/routes/+layout.server.ts` prerenders the app.
-- `svelte.config.js` uses `@sveltejs/adapter-static`.
-- Production base path is `/reaper2ma`; development base path is empty.
+- Projects are stored in IndexedDB through `src/lib/projects/`; language and theme preferences alone use localStorage.
+- Vite builds a static SPA. Production base path is `/reaper2ma`; development base path is `/`.
 - Build output is `build/` and must not be committed.
 
 ## Conversion invariants
@@ -76,11 +75,9 @@ Be careful with marker-name changes. Names are command-sensitive because they ar
 
 ## Known watchpoints
 
-- The advanced cue start input currently reuses `id="drive-number"`.
-- Timecode duration currently ignores repeated sequence timestamps.
 - Top-level macro and timecode GUIDs are hardcoded.
-- An all-colored CSV can produce an invalid main cue range.
-- CI package manager is inconsistent with the pnpm lockfile.
+- Browser IndexedDB and storage quota behavior differs in private browsing modes.
+- Large canvas timelines should be profiled on older mobile hardware.
 
 ## Validation expectations
 

@@ -1,66 +1,90 @@
-# 🎶 Reaper Markers to GrandMA3 💡
+# Reaper2MA
 
-A web application for converting Reaper project markers to grandMA3 timecode formats. This tool helps lighting professionals and audio engineers convert timing markers from Reaper DAW projects into formats suitable for lighting consoles and show control systems.
+Reaper2MA transforme localement un export CSV de marqueurs et régions REAPER en macros XML grandMA3. L’application est une SPA React : aucun CSV n’est envoyé à un serveur et aucun compte n’est requis.
 
-## Use the tool
+## Parcours
 
-🚀 **[Use Reaper2MA online](https://projects.hannesrueger.de/reaper2ma/)**
+- Bibliothèque locale de projets avec recherche, filtres, tris, duplication V2/V3, import et export JSON.
+- Assistant guidé pour analyser le CSV, choisir le mode régions, configurer cues, séquences, timecode, executors et macros additionnelles.
+- Aperçu compact des régions et marqueurs, avec virtualisation des longues listes.
+- Timeline canvas `Source REAPER` / `Sortie grandMA3`, cadrée sur la région sélectionnée ou sur le projet complet, zoomable et déplaçable à la souris, au trackpad ou au tactile.
+- Vérification finale et téléchargement d’un ZIP contenant le macro principal et les extras sélectionnés.
+- Aide permanente avec tutoriel d’export REAPER en secondes, contrôle du CSV, tags et outils optionnels de renumérotation.
+- Interface français/anglais, thème système, clair ou sombre.
 
-No installation or signup required - simply upload a csv exported from your Reaper project and get your converted markers instantly for free.
+## Préparer le CSV REAPER
 
-## Demo
+Reaper2MA attend les positions `Start`, `End` et `Length` en secondes décimales (`12.500`), sans timecode, mesures/beats ni format minutes:secondes.
 
-Check out the link above. You can create your own Reaper project or use [this demo file (click here to download)](./demo/demo.RPP).
+1. Clic droit sur la règle REAPER, puis `Time unit for ruler` → `Seconds`.
+2. Ouvrir `View` → `Region/Marker Manager` et activer `Markers`, ainsi que `Regions` si nécessaire.
+3. Trier la colonne `Start`, puis choisir `Renumber in timeline order` dans le menu contextuel (recommandé).
+4. Choisir `Export regions/markers…`, puis enregistrer en CSV.
 
-## Features
+Le tutoriel complet, avec exemples valides/invalides et options SWS/ReaPack, est accessible via `Aide` ou directement depuis l’étape d’import du CSV.
 
--   Auto-Convert markers from csv to MA timecode
--   Support for repeated and unique sequences / cues
--   Generate standalone grandMA3 REAPER transport macro libraries
--   Insert existing bump timecode events into a main sequence with the commented [grandMA3 bump-to-main plugin](./docs/grandma3-bump-to-main.md)
--   Run a standalone eight-pad [REAPER beat visualizer](./docs/reaper-beat-visualizer.md)
--   Web-based interface for easy access
--   No software installation required
+## Stockage et confidentialité
 
-## REAPER transport macros
+Les projets sont conservés dans IndexedDB. Un projet stocke le CSV source, les noms, les réglages, la progression et les dix dernières révisions ; les XML, le ZIP et la timeline sont recalculés à la demande.
 
-The app can also generate a standalone grandMA3 macro library with eight REAPER transport macros over OSC.
-See [docs/grandma3-reaper-osc.md](./docs/grandma3-reaper-osc.md) for setup, import instructions, and the distinction between the OSC line name and its numeric slot ID.
+L’application surveille le quota fourni par `navigator.storage.estimate()` : elle avertit à 80 %, refuse préventivement un import qui atteindrait 95 % et ne supprime jamais automatiquement un projet. Un export `.reaper2ma.json` contient le projet, ses sources référencées et son historique.
 
-## REAPER beat visualizer
+Les anciens réglages `reaper2ma:settings:v1` restent lus comme valeurs initiales du premier projet. La langue et le thème utilisent une préférence locale séparée.
 
-The repository includes a dependency-free Lua ReaScript that flashes a
-reusable eight-pad grid as the play cursor crosses project markers. Marker
-colors take priority, with the innermost containing region used as a fallback.
-See the [installation and usage guide](./docs/reaper-beat-visualizer.md).
+## Conversion grandMA3
 
-| From this              | To this            |
-| ---------------------- | ------------------ |
-| ![](./demo/reaper.png) | ![](./demo/ma.png) |
+- Les marqueurs non colorés deviennent les cues de la séquence principale.
+- Les marqueurs colorés sont regroupés par couleur exacte en séquences répétées.
+- Les marqueurs `Temp` et `Flash` deviennent des séquences de bump.
+- Le mode régions crée les séquences de régions, layers, pré-rolls et événements Off configurés.
+- Les tags existants (`BPM`, `CueFade`, timing de cue, parties, actions régions/layers) restent pris en charge.
+- Chaque séquence reçoit le Speed Master choisi.
+- Le nom du projet définit le slug des fichiers (`Traversée V2` → `traversee-v2_macro.xml`).
+- Le nom du timecode, modifiable indépendamment, définit les noms et références grandMA3.
+- Pour les macros additionnelles, le slot INT vaut `-2` avant grandMA3 2.4 et `-1` à partir de 2.4. Les modes LTC et la restauration automatique utilisent le slot externe choisi.
 
-## Contributing
+Le `Timecode Number`, le `TCSlot` source (choisi dans l’étape Sortie) et l’`OSC Slot ID` REAPER restent trois réglages distincts.
 
-Contributions are welcome! If you'd like to contribute to this project:
+## Développement
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-feature`)
-3. Make your changes
-4. Commit your changes (`git commit -am 'Add new feature'`)
-5. Push to the branch (`git push origin feature/new-feature`)
-6. Create a Pull Request
-
-## Development
-
-This project is built with SvelteKit. To run it locally:
+Prérequis : Node.js 22 et pnpm 10.
 
 ```sh
-# Install dependencies
-pnpm install
-
-# Start development server
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-## License
+Validation complète :
+
+```sh
+pnpm test
+pnpm check
+pnpm build
+```
+
+Le build statique est écrit dans `build/`. En production, Vite utilise le chemin de base `/reaper2ma/` pour GitHub Pages.
+
+## Architecture
+
+- `src/App.tsx` : orchestration de la bibliothèque, import/export et navigation.
+- `src/components/ProjectWizard.tsx` : reducer et étapes du parcours guidé.
+- `src/components/ProjectLibrary.tsx` et `ProjectOverview.tsx` : bibliothèque et synthèse d’un projet configuré.
+- `src/components/RegionBrowser.tsx` et `TimelineModal.tsx` : inspection accessible et canvas.
+- `src/lib/projects/` : modèles versionnés, repository IndexedDB, quotas, historique et runtime.
+- `src/lib/reaper2ma/` : analyse CSV, conversion et génération grandMA3.
+- `tests/reaper2ma.test.ts` : tests de compatibilité de conversion.
+- `tests/*.ui.test.*` et `tests/timeline.test.tsx` : stockage et interactions React.
+
+## Outils complémentaires
+
+Le dépôt contient aussi :
+
+- une bibliothèque de macros de transport REAPER via OSC, documentée dans [docs/grandma3-reaper-osc.md](./docs/grandma3-reaper-osc.md) ;
+- le plugin grandMA3 bump-to-main, documenté dans [docs/grandma3-bump-to-main.md](./docs/grandma3-bump-to-main.md) ;
+- le visualiseur REAPER autonome, documenté dans [docs/reaper-beat-visualizer.md](./docs/reaper-beat-visualizer.md).
+
+La synchronisation Google et les contrôles DJ/métronome ne font pas partie de cette version.
+
+## Licence
 
 MIT

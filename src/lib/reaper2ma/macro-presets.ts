@@ -6,6 +6,7 @@ import type {
     ExampleMacroPresetGroup,
     ExampleMacroPresetOutputFile,
     ExampleMacroPresetSelection,
+    GrandmaVersionProfile,
 } from "./types.js";
 
 const MACRO_XML_VERSION = "2.4.2.2";
@@ -22,9 +23,16 @@ function slugifyMacroName(name: string): string {
         .replace(/^-+|-+$/g, "");
 }
 
-function createMacroXml(preset: ExampleMacroPresetDefinition, timecodeName: string): string {
+function createMacroXmlWithSlots(
+    preset: ExampleMacroPresetDefinition,
+    timecodeName: string,
+    grandmaVersion: GrandmaVersionProfile,
+    externalTimecodeSlot: number,
+): string {
     const context: ExampleMacroPresetContext = {
         timecodeName,
+        internalTimecodeSlot: resolveInternalTimecodeSlot(grandmaVersion),
+        externalTimecodeSlot: resolveExternalTimecodeSlot(externalTimecodeSlot),
     };
 
     const obj = {
@@ -73,7 +81,7 @@ export const exampleMacroPresetGroups: ExampleMacroPresetGroup[] = [
                 "(Passage en Manuel Confirmé. Vraiment Certain ?)",
                 ({ timecodeName }) => `Off Timecode "${timecodeName}"`,
                 ({ timecodeName }) => `Top Timecode "${timecodeName}"`,
-                ({ timecodeName }) => `Set Timecode "${timecodeName}" "TCSlot" -2`,
+                ({ timecodeName, internalTimecodeSlot }) => `Set Timecode "${timecodeName}" "TCSlot" ${internalTimecodeSlot}`,
                 'Page 1',
                 'On Sequence "Rescue POS"',
                 'On Sequence "Erin" Cue 1',
@@ -86,7 +94,7 @@ export const exampleMacroPresetGroups: ExampleMacroPresetGroup[] = [
             createPreset("show-time-auto-restore", "show-time", "show time auto restore", "SHOW TIME AUTO RESTORE", [
                 "(Passage en Auto. Certain ?)",
                 "(Passage en Auto Confirmé. Vraiment Certain ?)",
-                ({ timecodeName }) => `Set Timecode "${timecodeName}" "TCSlot" 1`,
+                ({ timecodeName, externalTimecodeSlot }) => `Set Timecode "${timecodeName}" "TCSlot" ${externalTimecodeSlot}`,
                 ({ timecodeName }) => `Go+ Timecode "${timecodeName}"`,
             ]),
         ],
@@ -98,11 +106,11 @@ export const exampleMacroPresetGroups: ExampleMacroPresetGroup[] = [
         presets: [
             createPreset("timecode-switch-int", "timecode-control", "timecode switch int", "Timecode Switch INT", [
                 "(Passage en TimeCode Manuel. Certain ?)",
-                ({ timecodeName }) => `Set Timecode "${timecodeName}" "TCSlot" -2`,
+                ({ timecodeName, internalTimecodeSlot }) => `Set Timecode "${timecodeName}" "TCSlot" ${internalTimecodeSlot}`,
             ]),
             createPreset("timecode-switch-ltc", "timecode-control", "timecode switch ltc", "Timecode Switch LTC", [
                 "(Passage en TimeCode Auto. Certain ?)",
-                ({ timecodeName }) => `Set Timecode "${timecodeName}" "TCSlot" 1`,
+                ({ timecodeName, externalTimecodeSlot }) => `Set Timecode "${timecodeName}" "TCSlot" ${externalTimecodeSlot}`,
             ]),
             createPreset(
                 "timecode-rewind-and-switch-int",
@@ -113,7 +121,7 @@ export const exampleMacroPresetGroups: ExampleMacroPresetGroup[] = [
                     "(Rewind the current timecode and switch to INT)",
                     ({ timecodeName }) => `Off Timecode "${timecodeName}"`,
                     ({ timecodeName }) => `Top Timecode "${timecodeName}"`,
-                    ({ timecodeName }) => `Set Timecode "${timecodeName}" "TCSlot" -2`,
+                    ({ timecodeName, internalTimecodeSlot }) => `Set Timecode "${timecodeName}" "TCSlot" ${internalTimecodeSlot}`,
                     ({ timecodeName }) => `Pause Timecode "${timecodeName}"`,
                 ],
             ),
@@ -126,7 +134,7 @@ export const exampleMacroPresetGroups: ExampleMacroPresetGroup[] = [
                     "(Rewind the current timecode and switch to LTC)",
                     ({ timecodeName }) => `Off Timecode "${timecodeName}"`,
                     ({ timecodeName }) => `Top Timecode "${timecodeName}"`,
-                    ({ timecodeName }) => `Set Timecode "${timecodeName}" "TCSlot" 1`,
+                    ({ timecodeName, externalTimecodeSlot }) => `Set Timecode "${timecodeName}" "TCSlot" ${externalTimecodeSlot}`,
                     ({ timecodeName }) => `Go+ Timecode "${timecodeName}"`,
                 ],
             ),
@@ -148,6 +156,8 @@ export function createExampleMacroPresetOutputFiles(options: {
     sourceFileName: string;
     timecodeName: string;
     selection: ExampleMacroPresetSelection;
+    grandmaVersion?: GrandmaVersionProfile;
+    externalTimecodeSlot?: number;
 }): ExampleMacroPresetOutputFile[] {
     const selectedGroups = new Set<ExampleMacroPresetDefinition["groupId"]>();
 
@@ -171,7 +181,24 @@ export function createExampleMacroPresetOutputFiles(options: {
             .map((preset) => ({
                 presetId: preset.id,
                 name: `${preset.fileBaseName}.xml`,
-                content: createMacroXml(preset, resolvedTimecodeName),
+                content: createMacroXmlWithSlots(
+                    preset,
+                    resolvedTimecodeName,
+                    options.grandmaVersion ?? "pre-2.4",
+                    options.externalTimecodeSlot ?? 1,
+                ),
             })),
     );
+}
+
+export function resolveInternalTimecodeSlot(grandmaVersion: GrandmaVersionProfile): -2 | -1 {
+    return grandmaVersion === "2.4+" ? -1 : -2;
+}
+
+function resolveExternalTimecodeSlot(value: number): number {
+    if (!Number.isInteger(value) || value <= 0) {
+        throw new RangeError("externalTimecodeSlot must be a positive integer.");
+    }
+
+    return value;
 }

@@ -1,4 +1,5 @@
 import { createUniqueCuePlan } from "./cue-plan.js";
+import { createExecutorAssignmentPlan, type ExecutorAssignment, type ExecutorSlotGroup } from "./executor-plan.js";
 import { calculateTimecodeDuration, collectTimecodeTimestamps } from "./timecode-duration.js";
 import { XML_HEADER, xmlBuilder } from "./xml-common.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
@@ -16,7 +17,6 @@ import type {
 } from "./types.js";
 
 type MacroLine = Record<string, string>;
-type ExecutorSlotGroup = "main" | "bump";
 type OffCueBehavior =
     | {
           kind: "none";
@@ -38,6 +38,8 @@ type GeneratedSequence = {
     offCueBehavior: OffCueBehavior;
     assignToExecutor: boolean;
     executorSlotGroup: ExecutorSlotGroup;
+    executorRegionId?: string;
+    regionLabel?: string;
     appearanceName?: string;
     appearanceNumber?: number;
     appearanceColor?: string;
@@ -357,6 +359,8 @@ function createGeneratedSequences(
             ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
             ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
             regionId: sequence.regionId,
+            executorRegionId: sequence.regionId,
+            regionLabel: sequence.regionLabel,
             regionStart: sequence.start,
             regionEnd: sequence.end,
         });
@@ -377,6 +381,8 @@ function createGeneratedSequences(
                     start: layerSequence.start,
                     end: layerSequence.end,
                 },
+                executorRegionId: layerSequence.regionId,
+                regionLabel: layerSequence.regionLabel,
             });
         }
     }
@@ -402,6 +408,8 @@ function createGeneratedSequences(
             events: sequence.events,
             offCueBehavior: { kind: "timed", releaseDurationSeconds: sequence.releaseDurationSeconds },
             executorSlotGroup: "bump",
+            ...(sequence.regionId ? { executorRegionId: sequence.regionId } : {}),
+            ...(sequence.regionLabel ? { regionLabel: sequence.regionLabel } : {}),
             ...(sequence.appearanceName ? { appearanceName: sequence.appearanceName } : {}),
             ...(sequence.appearanceNumber !== undefined ? { appearanceNumber: sequence.appearanceNumber } : {}),
             ...(sequence.appearanceColor ? { appearanceColor: sequence.appearanceColor } : {}),
@@ -848,30 +856,27 @@ function compareTimecodeMacroEvents(left: TimecodeMacroEvent, right: TimecodeMac
     return left.sourceOrder - right.sourceOrder;
 }
 
-function createPageAssignmentCommands(settings: ConversionSettings, tempDataPoolName: string, sequences: GeneratedSequence[]): MacroLine[] {
-    if (settings.assignExecutors === false) {
-        return [];
+function createPageAssignmentCommands(tempDataPoolName: string, assignments: ExecutorAssignment[]): MacroLine[] {
+    return assignments.map((assignment) => createCommand(
+        `Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${assignment.localSequenceNumber} At Page ${assignment.pageNumber}.${assignment.slotNumber}`,
+    ));
+}
+
+function createPageLabelCommands(settings: ConversionSettings, filename: string, assignments: ExecutorAssignment[]): MacroLine[] {
+    if (settings.assignExecutors === false) return [];
+    if ((settings.executorLayout ?? "continuous") === "continuous" || assignments.length === 0) {
+        return [createCommand(`Label Page ${settings.pageNumber} ${quoteCommandValue(filename)}`)];
     }
 
-    const executorOffsets: Record<ExecutorSlotGroup, number> = {
-        main: 0,
-        bump: 0,
-    };
+    const pages = new Map<number, ExecutorAssignment[]>();
+    for (const assignment of assignments) {
+        pages.set(assignment.pageNumber, [...(pages.get(assignment.pageNumber) ?? []), assignment]);
+    }
 
-    return sequences.flatMap((sequence) => {
-        if (!sequence.assignToExecutor) {
-            return [];
-        }
-
-        const slotStart = sequence.executorSlotGroup === "bump" ? settings.bumpPageSlotStart : settings.pageSlotStart;
-        const slot = slotStart + executorOffsets[sequence.executorSlotGroup];
-        executorOffsets[sequence.executorSlotGroup] += 1;
-
-        return [
-            createCommand(
-                `Assign DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} At Page ${settings.pageNumber}.${slot}`,
-            ),
-        ];
+    return [...pages].map(([pageNumber, pageAssignments]) => {
+        const regionLabel = pageAssignments.find((assignment) => assignment.regionLabel)?.regionLabel;
+        const label = regionLabel ? `${filename} - ${regionLabel}` : filename;
+        return createCommand(`Label Page ${pageNumber} ${quoteCommandValue(label)}`);
     });
 }
 
@@ -891,7 +896,7 @@ export function generateMacroXML(
 ): string {
     const tempDataPoolName = createTempDataPoolName(filename);
     const sequences = createGeneratedSequences(settings, uniqueCues, regionSequences, regionLayerSequences, repeatedSequences, bumpSequences, bpmSequence);
-    const shouldAssignExecutors = settings.assignExecutors !== false;
+    const executorAssignments = createExecutorAssignmentPlan(settings, sequences);
     const timecodeCommands = createTimecodeCommands(
         settings,
         tempDataPoolName,
@@ -920,11 +925,11 @@ export function generateMacroXML(
                     ...sequences.flatMap((sequence) => createSequenceSetupCommands(tempDataPoolName, settings, sequence)),
                     ...timecodeCommands,
                     createCommand("cd root", "0.01"),
-                    ...createPageAssignmentCommands(settings, tempDataPoolName, sequences),
+                    ...createPageAssignmentCommands(tempDataPoolName, executorAssignments),
                     ...(settings.exportMode === "cues-and-timecode" && sequences.length > 0
                         ? [createCommand(`Label DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1 ${quoteCommandValue(filename)}`)]
                         : []),
-                    ...(shouldAssignExecutors ? [createCommand(`Label Page ${settings.pageNumber} ${quoteCommandValue(filename)}`)] : []),
+                    ...createPageLabelCommands(settings, filename, executorAssignments),
                     ...(firstFinalSequenceNumber !== undefined
                         ? [createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Sequence 1 Thru At Sequence ${firstFinalSequenceNumber}`)]
                         : []),

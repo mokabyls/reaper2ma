@@ -9,5 +9,5 @@
 		"types": ["node"],
 		"noEmit": false
 	},
-	"include": ["src/lib/reaper2ma/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
+	"include": ["src/lib/reaper2ma/**/*.ts", "tests/reaper2ma.test.ts"]
 }

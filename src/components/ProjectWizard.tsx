@@ -1,0 +1,430 @@
+import { useEffect, useId, useMemo, useReducer, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { analyzeReaperCsvProgressively, resolveInternalTimecodeSlot, type ReaperAnalysisPhase, type ReaperCsvAnalysis, type TimelinePreview } from "../lib/reaper2ma/index.js";
+import { createProjectRuntime } from "../lib/projects/runtime.js";
+import type { ProjectDocumentV1, ProjectSourceV1, ProjectStage } from "../lib/projects/index.js";
+import { useI18n } from "../i18n.js";
+import { RegionBrowser } from "./RegionBrowser.js";
+import { TimelineModal } from "./TimelineModal.js";
+import { ProjectSettingsSummary } from "./ProjectSettingsSummary.js";
+
+const stages: ProjectStage[] = ["source", "analysis", "cues", "sequences", "output", "executors", "extras", "review"];
+
+export function ProjectWizard({
+    project,
+    source,
+    analysis,
+    onSave,
+    onAttachSource,
+    onExit,
+    onStageChange,
+    onHelp,
+    onDownload,
+    onConfigured,
+}: {
+    project: ProjectDocumentV1;
+    source?: ProjectSourceV1;
+    analysis?: ReaperCsvAnalysis;
+    onSave: (project: ProjectDocumentV1, checkpoint?: boolean) => Promise<void>;
+    onAttachSource: (file: File, analysis: ReaperCsvAnalysis) => Promise<void>;
+    onExit: () => void;
+    onStageChange?: (stage: ProjectStage) => void;
+    onHelp: (section?: string) => void;
+    onDownload: (projectOverride?: ProjectDocumentV1) => Promise<void>;
+    onConfigured: (projectOverride?: ProjectDocumentV1) => Promise<void>;
+}) {
+    const { t, locale } = useI18n();
+    const [wizard, dispatch] = useReducer((state: { stage: ProjectStage }, action: { type: "go"; stage: ProjectStage }) => action.type === "go" ? { stage: action.stage } : state, { stage: project.currentStage });
+    const [timelineOpen, setTimelineOpen] = useState(false);
+    const [timelineRegionId, setTimelineRegionId] = useState<string | undefined>(analysis?.regions[0]?.id);
+    const [timelineMarkerId, setTimelineMarkerId] = useState<string>();
+    const [stageMotion, setStageMotion] = useState<"in" | "idle" | "out">("in");
+    const [reviewTimecodeName, setReviewTimecodeName] = useState(project.timecodeName);
+    const transitionFrameRef = useRef<number | undefined>(undefined);
+    const [error, setError] = useState("");
+    const runtime = useMemo(() => {
+        if (!source) return undefined;
+        try { return createProjectRuntime(project, source); } catch { return undefined; }
+    }, [project, source]);
+    const sequenceExamples = useMemo(() => {
+        const generated = runtime?.preview.generatedSequenceNames ?? [];
+        const mainName = `${project.settings.sequenceNamePrefix.trim()} Sequence ${project.settings.sequenceNumber}`.trim();
+        return [...new Set([...generated, ...(runtime?.artifacts.uniqueCues.length ? [mainName] : [])])].slice(0, 2);
+    }, [project.settings.sequenceNamePrefix, project.settings.sequenceNumber, runtime]);
+    const repeatExamples = useMemo(() => [
+        ...(runtime?.artifacts.repeatedSequences.map((sequence) => sequence.displayName) ?? []),
+        ...(runtime?.artifacts.bumpSequences.map((sequence) => sequence.displayName) ?? []),
+    ].slice(0, 2), [runtime]);
+    const generatedSequenceCount = runtime
+        ? runtime.preview.generatedSequenceNames.length + (runtime.artifacts.uniqueCues.length > 0 ? 1 : 0)
+        : 0;
+    const totalDurationSeconds = runtime ? Number.parseFloat(runtime.preview.duration) || 0 : 0;
+
+    useEffect(() => { dispatch({ type: "go", stage: project.currentStage }); }, [project.currentStage]);
+    useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [wizard.stage]);
+    useEffect(() => { setReviewTimecodeName(project.timecodeName); }, [project.timecodeName]);
+    useEffect(() => {
+        if (!timelineRegionId && analysis?.regions[0]) setTimelineRegionId(analysis.regions[0].id);
+    }, [analysis, timelineRegionId]);
+    useEffect(() => {
+        transitionFrameRef.current = requestAnimationFrame(() => setStageMotion("idle"));
+        return () => { if (transitionFrameRef.current !== undefined) cancelAnimationFrame(transitionFrameRef.current); };
+    }, []);
+
+    const update = async (patch: Partial<ProjectDocumentV1>, checkpoint = false) => {
+        await onSave({ ...project, ...patch, updatedAt: new Date().toISOString() }, checkpoint);
+    };
+    const updateSettings = (patch: Partial<ProjectDocumentV1["settings"]>) => update({ settings: { ...project.settings, ...patch } });
+    const go = async (stage: ProjectStage, checkpoint = true) => {
+        const completedStages = [...new Set([...project.completedStages, wizard.stage])];
+        if (stage !== wizard.stage) {
+            setStageMotion("out");
+            await waitForStageTransition();
+        }
+        dispatch({ type: "go", stage });
+        onStageChange?.(stage);
+        setStageMotion("in");
+        transitionFrameRef.current = requestAnimationFrame(() => {
+            transitionFrameRef.current = requestAnimationFrame(() => setStageMotion("idle"));
+        });
+        await update({ currentStage: stage, completedStages }, checkpoint);
+    };
+    const openTimeline = (regionId?: string, markerId?: string) => {
+        setTimelineRegionId(regionId);
+        setTimelineMarkerId(markerId);
+        setTimelineOpen(true);
+    };
+    const saveReviewTimecodeName = async (): Promise<ProjectDocumentV1> => {
+        const value = reviewTimecodeName.trim();
+        if (!value) { setReviewTimecodeName(project.timecodeName); return project; }
+        if (value === project.timecodeName) return project;
+        const nextProject = { ...project, timecodeName: value, updatedAt: new Date().toISOString() };
+        await onSave(nextProject);
+        return nextProject;
+    };
+    const currentIndex = stages.indexOf(wizard.stage);
+    const back = () => currentIndex <= 0 ? onExit() : void go(stages[currentIndex - 1], false);
+    const stageLabel = (stage: ProjectStage) => {
+        if (stage === "identity") return t("project.identity");
+        if (stage === "source") return t("stage.source");
+        if (stage === "analysis") return t("stage.analysis");
+        if (stage === "cues") return t("stage.cues");
+        if (stage === "sequences") return t("stage.sequences");
+        if (stage === "output") return t("stage.output");
+        if (stage === "executors") return t("stage.executors");
+        if (stage === "extras") return t("stage.extras");
+        return t("stage.review");
+    };
+
+    return (
+        <main className="page wizard-page">
+            <div className="wizard-topbar">
+                <button className="text-button" type="button" onClick={onExit}>← {project.projectName}</button>
+                <span>{stageLabel(wizard.stage)} · {Math.max(1, currentIndex + 1)}/{stages.length}</span>
+            </div>
+            <nav className="wizard-progress" aria-label="Project setup progress">
+                {stages.map((stage, index) => (
+                    <button
+                        key={stage}
+                        type="button"
+                        className={`${wizard.stage === stage ? "active" : ""}${project.completedStages.includes(stage) ? " complete" : ""}`}
+                        onClick={() => { if (source && (index <= currentIndex || project.completedStages.includes(stage))) void go(stage, false); }}
+                        aria-current={wizard.stage === stage ? "step" : undefined}
+                    >
+                        <span>{index + 1}</span><small>{stageLabel(stage)}</small>
+                    </button>
+                ))}
+            </nav>
+
+            <section className="assistant-card wizard-card">
+                <div className={`wizard-stage-content is-${stageMotion}`} key={wizard.stage}>
+                {wizard.stage === "source" ? (
+                    <SourceStep
+                        currentFileName={source?.fileName}
+                        error={error}
+                        onError={setError}
+                        onHelp={() => onHelp("export-csv")}
+                        onFile={async (file, nextAnalysis) => { await onAttachSource(file, nextAnalysis); dispatch({ type: "go", stage: "analysis" }); }}
+                    />
+                ) : null}
+
+                {wizard.stage === "analysis" && analysis ? (
+                    <>
+                        <StepHeader eyebrow={`02 · ${stageLabel("analysis")}`} title={t("analysis.title")} copy={t("analysis.copy")} />
+                        <div className="analysis-stats">
+                            <Stat value={analysis.markerCount} label={t("project.markers")} />
+                            <Stat value={analysis.regionCount} label={t("project.regions")} />
+                            <Stat value={formatShortDuration(analysis.durationSeconds)} label={t("project.duration")} />
+                        </div>
+                        {analysis.diagnostics.length ? (
+                            <div className="diagnostic-list">
+                                {analysis.diagnostics.map((diagnostic, index) => <p className={diagnostic.severity} key={`${diagnostic.code}-${index}`}>{translateDiagnostic(diagnostic.code, diagnostic.message, locale)}</p>)}
+                            </div>
+                        ) : null}
+                        <RegionBrowser analysis={analysis} onSelectionChange={setTimelineRegionId} onOpenTimeline={openTimeline} />
+                        <button className="button secondary timeline-launch" type="button" onClick={() => openTimeline(timelineRegionId ?? analysis.regions[0]?.id)}>⌁ {t("action.timelineRegion")}</button>
+                        <div className="assistant-question">
+                            {analysis.regionCount ? (
+                                <>
+                                    <h2>{t("analysis.useRegions")}</h2>
+                                    <p>{t("analysis.useRegionsHelp")}</p>
+                                    <div className="choice-grid two">
+                                        <button className={project.settings.importMode === "regions-and-markers" ? "choice selected" : "choice"} type="button" onClick={() => void updateSettings({ importMode: "regions-and-markers" })}><strong>{t("analysis.yes")}</strong><span>R1 → Sequence {project.settings.sequenceNumber + 1}</span></button>
+                                        <button className={project.settings.importMode === "markers-only" ? "choice selected" : "choice"} type="button" onClick={() => void updateSettings({ importMode: "markers-only" })}><strong>{t("analysis.no")}</strong><span>Main + colors</span></button>
+                                    </div>
+                                </>
+                            ) : <p className="assistant-note">{t("analysis.noRegions")}</p>}
+                        </div>
+                        <WizardActions onBack={back} onNext={() => go("cues")} />
+                    </>
+                ) : null}
+
+                {wizard.stage === "cues" ? (
+                    <>
+                        <StepHeader eyebrow={`03 · ${stageLabel("cues")}`} title={t("cues.title")} copy={t("cues.copy")} />
+                        <div className="field-grid">
+                            <NumberField label={t("cues.start")} help={t("cues.startHelp")} value={project.settings.cueStartNumber} min={1} max={9999} onChange={(value) => updateSettings({ cueStartNumber: value })} />
+                            {project.settings.importMode === "regions-and-markers" ? <NumberField label={t("cues.regionEnd")} help={t("cues.regionEndHelp")} value={project.settings.regionEndPreRollMs} min={0} max={5000} step={50} suffix="ms" onChange={(value) => updateSettings({ regionEndPreRollMs: value })} /> : null}
+                        </div>
+                        {project.settings.importMode === "regions-and-markers" ? (
+                            <div className="settings-section">
+                                <Toggle label={t("cues.layerPreRollEnabled")} help={t("cues.layerPreRollEnabledHelp")} checked={project.settings.regionLayerPreRollEnabled} onChange={(value) => updateSettings({ regionLayerPreRollEnabled: value })} />
+                                {project.settings.regionLayerPreRollEnabled ? <div className="reveal-panel"><NumberField label={t("cues.layerPreRoll")} help={t("cues.layerPreRollHelp")} value={project.settings.regionLayerPreRollMs} min={0} max={5000} step={50} suffix="ms" onChange={(value) => updateSettings({ regionLayerPreRollMs: value })} /></div> : null}
+                                <Toggle label={t("cues.autoOff")} help={t("cues.autoOffHelp")} checked={project.settings.autoOffRegionLayers} onChange={(value) => updateSettings({ autoOffRegionLayers: value })} />
+                            </div>
+                        ) : null}
+                        <WizardActions onBack={back} onNext={() => go("sequences")} />
+                    </>
+                ) : null}
+
+                {wizard.stage === "sequences" ? (
+                    <>
+                        <StepHeader eyebrow={`04 · ${stageLabel("sequences")}`} title={t("sequences.title")} copy={locale === "fr" ? "Définissez la plage et les noms utilisés dans votre DataPool." : "Set the range and names used in your DataPool."} />
+                        <div className="field-grid">
+                            <NumberField label={t("sequences.number")} help={t("sequences.numberHelp")} value={project.settings.sequenceNumber} min={1} max={9999} onChange={(value) => updateSettings({ sequenceNumber: value })} />
+                            <TextField label={t("sequences.namePrefix")} help={t("sequences.namePrefixHelp")} value={project.settings.sequenceNamePrefix} onChange={(value) => updateSettings({ sequenceNamePrefix: value })} examples={sequenceExamples} />
+                            <TextField label={t("sequences.repeatPrefix")} help={t("sequences.repeatPrefixHelp")} value={project.settings.prefix} onChange={(value) => updateSettings({ prefix: value })} examples={repeatExamples} />
+                            <NumberField label={t("sequences.appearance")} help={t("sequences.appearanceHelp")} value={project.settings.appearanceStartNumber} min={1} max={9999} onChange={(value) => updateSettings({ appearanceStartNumber: value })} />
+                            <NumberField label={t("sequences.speed")} help={t("sequences.speedHelp")} value={Number(project.settings.speedMaster.split(".")[1] ?? 4)} min={1} max={15} prefix="3." onChange={(value) => updateSettings({ speedMaster: `3.${value}` })} />
+                        </div>
+                        <WizardActions onBack={back} onNext={() => go("output")} />
+                    </>
+                ) : null}
+
+                {wizard.stage === "output" ? (
+                    <>
+                        <StepHeader eyebrow={`05 · ${stageLabel("output")}`} title={t("output.title")} copy={locale === "fr" ? "Le macro XML est toujours inclus dans le ZIP." : "The macro XML is always included in the ZIP."} />
+                        <div className="choice-grid two output-choices">
+                            <button className={project.settings.exportMode === "cues-and-timecode" ? "choice selected" : "choice"} type="button" onClick={() => void updateSettings({ exportMode: "cues-and-timecode" })}><strong>{t("output.full")}</strong><span>{t("output.fullHelp")}</span></button>
+                            <button className={project.settings.exportMode === "cues-only" ? "choice selected" : "choice"} type="button" onClick={() => void updateSettings({ exportMode: "cues-only" })}><strong>{t("output.cues")}</strong><span>{t("output.cuesHelp")}</span></button>
+                        </div>
+                        <div className="field-grid output-fields reveal-panel">
+                            {project.settings.exportMode === "cues-and-timecode" ? (
+                                <NumberField label={t("output.timecodeNumber")} help={t("output.timecodeNumberHelp")} value={project.settings.timecodeNumber} min={1} max={9999} onChange={(value) => updateSettings({ timecodeNumber: value })} />
+                            ) : null}
+                            <NumberField label={t("output.incomingSlot")} help={t("output.incomingSlotHelp")} value={project.settings.externalTimecodeSlot} min={1} max={9999} onChange={(value) => updateSettings({ externalTimecodeSlot: value })} />
+                        </div>
+                        <WizardActions onBack={back} onNext={() => go("executors")} />
+                    </>
+                ) : null}
+
+                {wizard.stage === "executors" ? (
+                    <>
+                        <StepHeader eyebrow={`06 · ${stageLabel("executors")}`} title={t("executors.title")} copy={locale === "fr" ? "Vous pourrez toujours assigner les séquences manuellement plus tard." : "You can always assign sequences manually later."} />
+                        <Toggle label={t("executors.assign")} help={t("executors.assignHelp")} checked={project.settings.assignExecutors} onChange={(value) => updateSettings({ assignExecutors: value })} />
+                        {project.settings.assignExecutors ? (
+                            <div className="reveal-panel">
+                                {project.settings.importMode === "regions-and-markers" && analysis?.regionCount ? (
+                                    <div className="executor-layout-option">
+                                        <Toggle label={t("executors.regionPerPage")} help={t("executors.regionPerPageHelp")} checked={(project.settings.executorLayout ?? "continuous") === "region-per-page"} onChange={(value) => updateSettings({ executorLayout: value ? "region-per-page" : "continuous" })} />
+                                    </div>
+                                ) : null}
+                                <div className="field-grid three">
+                                    <NumberField label={t("executors.page")} help={t("executors.pageHelp")} value={project.settings.pageNumber} min={1} max={9999} onChange={(value) => updateSettings({ pageNumber: value })} />
+                                    <NumberField label={t("executors.main")} help={t("executors.mainHelp")} value={project.settings.pageSlotStart} min={101} max={490} onChange={(value) => updateSettings({ pageSlotStart: value })} />
+                                    <NumberField label={t("executors.bump")} help={t("executors.bumpHelp")} value={project.settings.bumpPageSlotStart} min={101} max={490} onChange={(value) => updateSettings({ bumpPageSlotStart: value })} />
+                                </div>
+                                <ExecutorAssignmentPreview assignments={runtime?.executorAssignments ?? []} />
+                            </div>
+                        ) : null}
+                        <WizardActions onBack={back} onNext={() => go("extras")} />
+                    </>
+                ) : null}
+
+                {wizard.stage === "extras" ? (
+                    <>
+                        <StepHeader eyebrow={`07 · ${stageLabel("extras")}`} title={t("extras.title")} copy={locale === "fr" ? "Ces bibliothèques XML sont ajoutées au même ZIP." : "These XML libraries are added to the same ZIP."} />
+                        <div className="settings-section">
+                            <Toggle label={t("extras.showTime")} help={t("extras.showTimeHelp")} checked={project.settings.exportShowTimeMacros} onChange={(value) => updateSettings({ exportShowTimeMacros: value })} />
+                            <Toggle label={t("extras.timecodeControl")} help={t("extras.timecodeControlHelp")} checked={project.settings.exportTimecodeControlMacros} onChange={(value) => updateSettings({ exportTimecodeControlMacros: value })} />
+                            <Toggle label={t("extras.reaper")} help={t("extras.reaperHelp")} checked={project.settings.includeReaperTransportMacros} onChange={(value) => updateSettings({ includeReaperTransportMacros: value })} />
+                        </div>
+                        {project.settings.exportShowTimeMacros || project.settings.exportTimecodeControlMacros ? (
+                            <div className="field-grid reveal-panel">
+                                <SelectField label={t("extras.version")} help={t("extras.versionHelp")} value={project.settings.grandmaVersion} onChange={(value) => updateSettings({ grandmaVersion: value as "pre-2.4" | "2.4+" })} options={[{ value: "2.4+", label: "2.4+" }, { value: "pre-2.4", label: "Pre 2.4" }]} />
+                                <div className="resolved-field"><span>{t("extras.ltcSlot")}</span><strong>TCSlot {project.settings.externalTimecodeSlot}</strong><small>{t("extras.ltcSlotReview")}</small></div>
+                                <div className="resolved-field"><span>{t("extras.internalSlot")}</span><strong>TCSlot {resolveInternalTimecodeSlot(project.settings.grandmaVersion)}</strong></div>
+                            </div>
+                        ) : null}
+                        {project.settings.includeReaperTransportMacros ? (
+                            <details className="advanced-details" open>
+                                <summary>REAPER OSC</summary>
+                                <div className="field-grid">
+                                    <NumberField label={t("extras.oscSlot")} help={t("extras.oscSlotHelp")} value={project.settings.transportOscSlotId} min={1} onChange={(value) => updateSettings({ transportOscSlotId: value })} />
+                                    <TextField label={t("extras.oscName")} help={t("extras.oscNameHelp")} value={project.settings.transportOscDataName} onChange={(value) => updateSettings({ transportOscDataName: value })} />
+                                    <TextField label={t("extras.macroPrefix")} help={t("extras.macroPrefixHelp")} value={project.settings.transportMacroNamePrefix} onChange={(value) => updateSettings({ transportMacroNamePrefix: value })} />
+                                    <TextField label={t("extras.outputFile")} help={t("extras.outputFileHelp")} value={project.settings.transportOutputFileName} onChange={(value) => updateSettings({ transportOutputFileName: value })} />
+                                </div>
+                            </details>
+                        ) : null}
+                        <WizardActions onBack={back} onNext={() => go("review")} />
+                    </>
+                ) : null}
+
+                {wizard.stage === "review" ? (
+                    <>
+                        <StepHeader eyebrow={`08 · ${stageLabel("review")}`} title={t("review.title")} copy={t("review.copy")} />
+                        {runtime ? (
+                            <>
+                                <div className="analysis-stats review-stats">
+                                    <Stat value={generatedSequenceCount} label={t("review.sequences")} />
+                                    <Stat value={runtime.preview.uniqueCueCount} label={t("review.mainCues")} />
+                                    <Stat value={`${formatSeconds(totalDurationSeconds)} s`} label={t("review.durationSeconds")} />
+                                    <Stat value={formatClockDuration(totalDurationSeconds)} label={t("review.durationClock")} />
+                                </div>
+                                {runtime.preview.diagnostics.length ? <div className="diagnostic-list">{runtime.preview.diagnostics.map((diagnostic, index) => <p className={diagnostic.severity} key={`${diagnostic.code}-${index}`}>{translateDiagnostic(diagnostic.code, diagnostic.message, locale)}</p>)}</div> : null}
+                                <div className="review-files"><h3>{t("review.files")}</h3>{runtime.files.map((file) => <code key={file.name}>{file.name}</code>)}</div>
+                                <div className="review-identity">
+                                    <div><span>{t("project.name")}</span><strong>{project.projectName}</strong></div>
+                                    <TextField
+                                        label={t("project.timecode")}
+                                        help={t("review.timecodeEditable")}
+                                        value={reviewTimecodeName}
+                                        onChange={setReviewTimecodeName}
+                                        onBlur={() => void saveReviewTimecodeName()}
+                                        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                                    />
+                                </div>
+                                <ProjectSettingsSummary project={project} executorAssignmentCount={runtime.executorAssignments.length} onEdit={(stage) => void go(stage, false)} />
+                                <button className="button secondary timeline-launch" type="button" onClick={() => openTimeline(undefined)}>⌁ {t("action.timeline")}</button>
+                                <div className="wizard-actions final-actions">
+                                    <button className="button secondary" type="button" onClick={back}>{t("action.back")}</button>
+                                    <button className="button primary large" type="button" onClick={async () => { const projectForExport = await saveReviewTimecodeName(); await onDownload(projectForExport); await onConfigured(projectForExport); }}>{t("review.download")} ↓</button>
+                                </div>
+                            </>
+                        ) : <div className="diagnostic-list"><p className="error">{t("error.generic")}</p></div>}
+                    </>
+                ) : null}
+                </div>
+            </section>
+            {timelineOpen && analysis ? <TimelineModal analysis={analysis} output={runtime?.timeline as TimelinePreview | undefined} regionId={timelineRegionId} focusMarkerId={timelineMarkerId} onClose={() => setTimelineOpen(false)} /> : null}
+        </main>
+    );
+}
+
+function SourceStep({ currentFileName, error, onError, onHelp, onFile }: { currentFileName?: string; error: string; onError: (value: string) => void; onHelp: () => void; onFile: (file: File, analysis: ReaperCsvAnalysis) => Promise<void> }) {
+    const { t } = useI18n();
+    const [phase, setPhase] = useState<string>();
+    const processFile = async (file: File) => {
+        if (!file.name.toLowerCase().endsWith(".csv")) { onError(t("source.invalid")); return; }
+        onError("");
+        try {
+            setPhase(t("analysis.processing.read"));
+            const csvText = await file.text();
+            await yieldFrame();
+            const phaseLabels: Record<ReaperAnalysisPhase, string> = {
+                validation: t("analysis.processing.validate"),
+                regions: t("analysis.processing.regions"),
+                markers: t("analysis.processing.markers"),
+                preview: t("analysis.processing.preview"),
+            };
+            const analysis = await analyzeReaperCsvProgressively(csvText, (nextPhase) => setPhase(phaseLabels[nextPhase]));
+            const fatal = analysis.diagnostics.find((diagnostic) => diagnostic.severity === "error");
+            if (fatal) { onError(fatal.message); setPhase(undefined); return; }
+            await onFile(file, analysis);
+        } catch (caught) {
+            onError(caught instanceof Error ? caught.message : t("error.generic"));
+        } finally {
+            setPhase(undefined);
+        }
+    };
+    const fromInput = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (file) void processFile(file); event.target.value = ""; };
+    const drop = (event: DragEvent<HTMLLabelElement>) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void processFile(file); };
+    return (
+        <>
+            <StepHeader eyebrow="01 · CSV" title={t("source.title")} copy={t("source.copy")} />
+            <label className={`drop-zone${phase ? " processing" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={drop}>
+                <input type="file" accept=".csv,text/csv" onChange={fromInput} />
+                {phase ? <><span className="analysis-spinner" /><strong>{phase}</strong><small>{currentFileName ?? "CSV"}</small></> : <><span className="upload-symbol">↑</span><strong>{t("source.drop")}</strong><span>{t("source.choose")}</span>{currentFileName ? <small>{t("source.replace")} · {currentFileName}</small> : null}</>}
+            </label>
+            <button className="source-help-link" type="button" onClick={onHelp}>? {t("source.exportHelp")}</button>
+            {error ? <div className="diagnostic-list"><p className="error" role="alert">{error}</p></div> : null}
+        </>
+    );
+}
+
+function StepHeader({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) { return <header className="assistant-heading"><div className="assistant-speaker"><i aria-hidden="true">R2</i><span>Reaper2MA</span></div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{copy}</p></header>; }
+function Stat({ value, label }: { value: string | number; label: string }) { return <div className="stat-card"><strong>{value}</strong><span>{label}</span></div>; }
+function Toggle({ label, help, checked, onChange }: { label: string; help?: string; checked: boolean; onChange: (value: boolean) => void | Promise<void> }) {
+    const id = useId();
+    return <div className="toggle-row"><div className="toggle-copy"><label htmlFor={id}>{label}</label>{help ? <HelpTooltip label={label} content={help} /> : null}</div><label className="toggle-switch" htmlFor={id}><input id={id} type="checkbox" checked={checked} onChange={(event) => void onChange(event.target.checked)} /><i aria-hidden="true" /></label></div>;
+}
+function NumberField({ label, help, value, onChange, min, max, step = 1, prefix, suffix }: { label: string; help?: string; value: number; onChange: (value: number) => void | Promise<void>; min?: number; max?: number; step?: number; prefix?: string; suffix?: string }) {
+    const id = useId();
+    return <div className="field"><FieldHeading id={id} label={label} help={help} /><div className="affixed-input">{prefix ? <b>{prefix}</b> : null}<input id={id} aria-label={label} type="number" value={value} min={min} max={max} step={step} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next) && (min === undefined || next >= min) && (max === undefined || next <= max)) void onChange(next); }} />{suffix ? <b>{suffix}</b> : null}</div></div>;
+}
+function TextField({ label, help, value, onChange, examples, onBlur, onKeyDown }: { label: string; help?: string; value: string; onChange: (value: string) => void | Promise<void>; examples?: string[]; onBlur?: () => void; onKeyDown?: (event: ReactKeyboardEvent<HTMLInputElement>) => void }) {
+    const { t } = useI18n();
+    const id = useId();
+    return <div className="field"><FieldHeading id={id} label={label} help={help} /><input id={id} aria-label={label} type="text" value={value} onChange={(event) => void onChange(event.target.value)} onBlur={onBlur} onKeyDown={onKeyDown} />{examples?.length ? <span className="generated-examples"><small>{t("field.preview")}</small>{examples.map((example) => <code key={example}>{example}</code>)}</span> : null}</div>;
+}
+function SelectField({ label, help, value, onChange, options }: { label: string; help?: string; value: string; onChange: (value: string) => void | Promise<void>; options: Array<{ value: string; label: string }> }) {
+    const id = useId();
+    return <div className="field"><FieldHeading id={id} label={label} help={help} /><select id={id} value={value} onChange={(event) => void onChange(event.target.value)}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>;
+}
+function FieldHeading({ id, label, help }: { id: string; label: string; help?: string }) {
+    return <div className="field-heading"><label htmlFor={id}>{label}</label>{help ? <HelpTooltip label={label} content={help} /> : null}</div>;
+}
+function HelpTooltip({ label, content }: { label: string; content: string }) {
+    const { t } = useI18n();
+    const tooltipId = useId();
+    const rootRef = useRef<HTMLSpanElement>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const [open, setOpen] = useState(false);
+
+    useEffect(() => {
+        if (!open) return;
+        const closeOutside = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+        const closeWithEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); buttonRef.current?.blur(); } };
+        document.addEventListener("pointerdown", closeOutside);
+        document.addEventListener("keydown", closeWithEscape);
+        return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeWithEscape); };
+    }, [open]);
+
+    return <span ref={rootRef} className={`help-tooltip${open ? " is-open" : ""}`} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocus={() => setOpen(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}><button ref={buttonRef} className="help-tooltip-button" type="button" aria-label={`${t("action.help")} : ${label}`} aria-describedby={open ? tooltipId : undefined} onClick={(event) => { event.preventDefault(); setOpen(true); }}><span aria-hidden="true">?</span></button>{open ? <span className="help-tooltip-bubble" id={tooltipId} role="tooltip">{content}</span> : null}</span>;
+}
+function ExecutorAssignmentPreview({ assignments }: { assignments: NonNullable<ReturnType<typeof createProjectRuntime>["executorAssignments"]> }) {
+    const { t } = useI18n();
+    const pages = new Map<number, typeof assignments>();
+    for (const assignment of assignments) pages.set(assignment.pageNumber, [...(pages.get(assignment.pageNumber) ?? []), assignment]);
+
+    return <section className="executor-assignment-preview" aria-labelledby="executor-assignment-title"><header><div><h3 id="executor-assignment-title">{t("executors.preview")}</h3><p>{t("executors.previewHelp")}</p></div><span>{assignments.length}</span></header><div className="executor-page-list">{[...pages].map(([pageNumber, pageAssignments]) => <section className="executor-page" key={pageNumber}><header><strong>Page {pageNumber}</strong><span>{pageAssignments.length} {t("executors.sequenceCount")}</span></header><div className="executor-assignment-list" role="list">{pageAssignments.map((assignment) => <div className="executor-assignment-row" role="listitem" key={`${assignment.pageNumber}-${assignment.slotNumber}-${assignment.sequenceNumber}`}><code>Sequence {assignment.sequenceNumber}</code><span title={assignment.sequenceName}>{assignment.sequenceName}</span><strong>Page {assignment.pageNumber}.{assignment.slotNumber}</strong></div>)}</div></section>)}</div></section>;
+}
+function WizardActions({ onBack, onNext }: { onBack: () => void; onNext: () => void | Promise<void> }) { const { t } = useI18n(); return <div className="wizard-actions"><button className="button secondary" type="button" onClick={onBack}>{t("action.back")}</button><button className="button primary" type="button" onClick={() => void onNext()}>{t("action.continue")} →</button></div>; }
+function formatShortDuration(value: number) { const minutes = Math.floor(value / 60); const seconds = Math.floor(value % 60); return `${minutes}:${String(seconds).padStart(2, "0")}`; }
+function formatSeconds(value: number) { return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, ""); }
+function formatClockDuration(value: number) { const total = Math.max(0, Math.floor(value)); const hours = Math.floor(total / 3600); const minutes = Math.floor((total % 3600) / 60); const seconds = total % 60; return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`; }
+function yieldFrame() { return new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); }
+function waitForStageTransition() { if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return Promise.resolve(); return new Promise<void>((resolve) => window.setTimeout(resolve, 150)); }
+function translateDiagnostic(code: string, fallback: string, locale: string) {
+    if (code === "conversion.empty-main-sequence") {
+        return locale === "fr"
+            ? "Aucune séquence principale ne sera créée : aucun marqueur standard non coloré n’est envoyé vers cette pile. Ce n’est pas bloquant : les séquences de régions, layers, répétitions, bumps et BPM seront tout de même exportées lorsqu’elles existent ; le numéro réservé à la séquence principale restera simplement libre. Si ce n’est pas le résultat attendu, ajoutez un marqueur non coloré hors région ou le tag [GLOBAL] ou [MAIN] à un marqueur."
+            : "No main sequence will be created because no standard uncolored marker is routed to it. This does not block the export: region, layer, repeated-effect, bump, and BPM sequences are still exported when present; the number reserved for the main sequence simply remains unused. If you expected a main sequence, add an uncolored marker outside the regions or tag a marker with [GLOBAL] or [MAIN].";
+    }
+    if (locale !== "fr") return fallback;
+    if (code === "csv.missing-headers") return "Le CSV ne contient pas toutes les colonnes obligatoires : #, Name et Start.";
+    if (code === "csv.invalid-timestamp") return "Certaines positions ne sont pas exprimées en secondes. Réexportez le CSV depuis REAPER avec la règle en secondes.";
+    if (code === "conversion.no-regions") return "Le mode régions est actif mais aucune région valide n’a été trouvée.";
+    if (code === "conversion.no-markers") return "Aucun marqueur n’a été trouvé dans le CSV.";
+    return fallback;
+}

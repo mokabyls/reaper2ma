@@ -28,6 +28,8 @@ export type TimelinePreviewTrack = {
     displayName: string;
     color: string;
     laneCount: number;
+    /** Region owning this track, when the generated sequence is region-scoped. */
+    regionId?: string;
     events: TimelinePreviewEvent[];
 };
 
@@ -126,6 +128,7 @@ export function createTimelinePreview(artifacts: ConversionArtifacts, settings: 
         durationSeconds,
         tracks: tracks.map(({ regionId, regionLayer, ...track }) => ({
             ...track,
+            ...((regionId ?? regionLayer?.regionId) ? { regionId: regionId ?? regionLayer?.regionId } : {}),
             events: track.events.map(({ priority, sourceOrder, regionActions, regionLayerActions, ...event }) => event),
         })),
         ticks,

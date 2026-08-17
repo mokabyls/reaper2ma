@@ -1,0 +1,236 @@
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+
+export type Locale = "fr" | "en";
+
+const messages = {
+    "app.tagline": { fr: "De REAPER à grandMA3, simplement.", en: "From REAPER to grandMA3, simply." },
+    "app.local": { fr: "Vos fichiers restent dans ce navigateur.", en: "Your files stay in this browser." },
+    "app.theme": { fr: "Changer le thème", en: "Change theme" },
+    "action.back": { fr: "Retour", en: "Back" },
+    "action.continue": { fr: "Continuer", en: "Continue" },
+    "action.cancel": { fr: "Annuler", en: "Cancel" },
+    "action.close": { fr: "Fermer", en: "Close" },
+    "action.open": { fr: "Ouvrir", en: "Open" },
+    "action.help": { fr: "Aide", en: "Help" },
+    "action.edit": { fr: "Modifier", en: "Edit" },
+    "action.delete": { fr: "Supprimer", en: "Delete" },
+    "action.duplicate": { fr: "Dupliquer", en: "Duplicate" },
+    "action.export": { fr: "Exporter", en: "Export" },
+    "action.import": { fr: "Importer un projet", en: "Import project" },
+    "action.newProject": { fr: "Nouveau projet", en: "New project" },
+    "action.timeline": { fr: "Ouvrir la timeline", en: "Open timeline" },
+    "action.timelineRegion": { fr: "Voir uniquement cette région dans la timeline", en: "View only this region in the timeline" },
+    "help.firstView": { fr: "Guide REAPER et tags", en: "REAPER and tag guide" },
+    "field.preview": { fr: "Aperçu généré", en: "Generated preview" },
+    "library.title": { fr: "Vos projets", en: "Your projects" },
+    "library.subtitle": { fr: "Reprenez un show ou créez une nouvelle version.", en: "Resume a show or create a new version." },
+    "library.search": { fr: "Rechercher un projet, timecode ou CSV", en: "Search project, timecode or CSV" },
+    "library.all": { fr: "Tous", en: "All" },
+    "library.drafts": { fr: "Brouillons", en: "Drafts" },
+    "library.configured": { fr: "Configurés", en: "Configured" },
+    "library.sort.updated": { fr: "Dernière modification", en: "Last updated" },
+    "library.sort.created": { fr: "Date de création", en: "Created date" },
+    "library.sort.name": { fr: "Nom", en: "Name" },
+    "library.sort.duration": { fr: "Durée", en: "Duration" },
+    "library.empty": { fr: "Aucun projet ne correspond à cette recherche.", en: "No project matches this search." },
+    "library.statusLabel": { fr: "État du projet", en: "Project status" },
+    "library.sortLabel": { fr: "Trier les projets", en: "Sort projects" },
+    "project.create.title": { fr: "Comment s’appelle ce projet ?", en: "What is this project called?" },
+    "project.create.copy": { fr: "Ce nom sera aussi celui du timecode. Vous pourrez les séparer ensuite.", en: "This will also be the timecode name. You can separate them later." },
+    "project.name": { fr: "Nom du projet", en: "Project name" },
+    "project.timecode": { fr: "Nom du timecode", en: "Timecode name" },
+    "project.created": { fr: "Créé", en: "Created" },
+    "project.updated": { fr: "Modifié", en: "Updated" },
+    "project.duration": { fr: "Durée source", en: "Source duration" },
+    "project.markers": { fr: "Marqueurs", en: "Markers" },
+    "project.regions": { fr: "Régions", en: "Regions" },
+    "project.draft": { fr: "Brouillon", en: "Draft" },
+    "project.ready": { fr: "Configuré", en: "Configured" },
+    "project.overview": { fr: "Vue du projet", en: "Project overview" },
+    "project.identity": { fr: "Identité", en: "Identity" },
+    "project.source": { fr: "Source REAPER", en: "REAPER source" },
+    "project.settings": { fr: "Configuration grandMA3", en: "grandMA3 setup" },
+    "project.history": { fr: "Historique", en: "History" },
+    "project.saveNames": { fr: "Enregistrer les noms", en: "Save names" },
+    "project.notFound": { fr: "Ce projet local n’existe plus dans ce navigateur.", en: "This local project no longer exists in this browser." },
+    "source.title": { fr: "Ajoutons l’export REAPER", en: "Add the REAPER export" },
+    "source.copy": { fr: "Choisissez le CSV des marqueurs et régions. Rien n’est envoyé en ligne.", en: "Choose the marker and region CSV. Nothing is uploaded." },
+    "source.drop": { fr: "Déposez le CSV ici", en: "Drop the CSV here" },
+    "source.choose": { fr: "Choisir un fichier CSV", en: "Choose a CSV file" },
+    "source.replace": { fr: "Remplacer le CSV", en: "Replace CSV" },
+    "source.invalid": { fr: "Choisissez un fichier .csv valide.", en: "Choose a valid .csv file." },
+    "source.exportHelp": { fr: "Comment exporter le CSV en secondes depuis REAPER ?", en: "How do I export a CSV in seconds from REAPER?" },
+    "analysis.title": { fr: "Voici ce que j’ai trouvé", en: "Here is what I found" },
+    "analysis.copy": { fr: "Vérifiez la structure avant de décider comment créer les séquences.", en: "Check the structure before deciding how to create sequences." },
+    "analysis.useRegions": { fr: "Créer une séquence par région ?", en: "Create one sequence per region?" },
+    "analysis.useRegionsHelp": { fr: "Oui crée une séquence grandMA3 pour chaque région REAPER. Non conserve une séquence principale et les répétitions par couleur.", en: "Yes creates a grandMA3 sequence for each REAPER region. No keeps one main sequence and color repetitions." },
+    "analysis.noRegions": { fr: "Aucune région REAPER détectée : les marqueurs restent dans le mode classique.", en: "No REAPER region detected: markers stay in classic mode." },
+    "analysis.yes": { fr: "Oui, par région", en: "Yes, per region" },
+    "analysis.no": { fr: "Non, mode classique", en: "No, classic mode" },
+    "analysis.processing.read": { fr: "Lecture du fichier", en: "Reading file" },
+    "analysis.processing.validate": { fr: "Validation des colonnes", en: "Validating columns" },
+    "analysis.processing.regions": { fr: "Détection des régions", en: "Detecting regions" },
+    "analysis.processing.markers": { fr: "Regroupement des marqueurs", en: "Grouping markers" },
+    "analysis.processing.preview": { fr: "Préparation des aperçus", en: "Preparing previews" },
+    "region.default": { fr: "Par défaut", en: "Default" },
+    "region.global": { fr: "Global / Hors région", en: "Global / Outside regions" },
+    "region.group": { fr: "Groupe", en: "Group" },
+    "region.empty": { fr: "Aucun marqueur dans cette région.", en: "No markers in this region." },
+    "region.openTimelineHint": { fr: "Double-cliquer pour ouvrir cette région dans la timeline", en: "Double-click to open this region in the timeline" },
+    "marker.openTimelineHint": { fr: "Double-cliquer pour ouvrir la timeline et centrer ce marqueur", en: "Double-click to open the timeline and center this marker" },
+    "cues.title": { fr: "Numérotation et fins de région", en: "Cue numbering and region endings" },
+    "cues.copy": { fr: "Choisis le premier numéro de cue. En mode régions, règle aussi les événements automatiques qui encadrent chaque région.", en: "Choose the first cue number. In region mode, also set the automatic events surrounding each region." },
+    "cues.start": { fr: "Premier cue de la séquence principale", en: "Main sequence first cue" },
+    "cues.startHelp": { fr: "Cette valeur concerne uniquement la séquence principale, alimentée par les marqueurs non colorés ou marqués [GLOBAL] / [MAIN]. Avec 1, ses cues seront numérotés 1, 2, 3… Les autres séquences conservent leur propre numérotation à partir de 1.", en: "This value only affects the main sequence, fed by uncolored markers or markers tagged [GLOBAL] / [MAIN]. With 1, its cues are numbered 1, 2, 3… Other sequences keep their own numbering starting at 1." },
+    "cues.regionEnd": { fr: "Anticipation de la fin de région", en: "Region-end anticipation" },
+    "cues.regionEndHelp": { fr: "Crée une cue « Region End » et la déclenche avant la fin de la région. Exemple : si la région se termine à 30.000 s et que tu saisis 750 ms, l’événement apparaît à 29.250 s dans le timecode. Cela prépare la transition vers la suite.", en: "Creates a Region End cue and triggers it before the region ends. Example: if the region ends at 30.000 s and you enter 750 ms, the event appears at 29.250 s in the timecode. This prepares the transition into what follows." },
+    "cues.layerPreRollEnabled": { fr: "Préparer les layers avant leur départ", en: "Prepare layers before they start" },
+    "cues.layerPreRollEnabledHelp": { fr: "Ajoute une première cue nommée « Layer Pre-Roll » à chaque séquence de layer. Elle est déclenchée avant la région afin que la séquence soit déjà positionnée avant son premier vrai cue.", en: "Adds a first cue named Layer Pre-Roll to every layer sequence. It triggers before the region so the sequence is already positioned before its first real cue." },
+    "cues.layerPreRoll": { fr: "Avance de préparation des layers", en: "Layer preparation lead time" },
+    "cues.layerPreRollHelp": { fr: "Définit combien de temps avant le début de la région la cue « Layer Pre-Roll » est déclenchée. Exemple : pour une région à 12.000 s et une avance de 750 ms, elle apparaît à 11.250 s dans le timecode.", en: "Sets how long before the region starts the Layer Pre-Roll cue is triggered. Example: for a region at 12.000 s and a 750 ms lead time, it appears at 11.250 s in the timecode." },
+    "cues.autoOff": { fr: "Éteindre automatiquement les layers en fin de région", en: "Automatically turn layers off at region end" },
+    "cues.autoOffHelp": { fr: "Ajoute un événement Off sur chaque track de layer lorsque sa région se termine. Sans cette option, un layer peut rester actif jusqu’à ce qu’une autre commande l’arrête.", en: "Adds an Off event to every layer track when its region ends. Without this option, a layer can remain active until another command stops it." },
+    "sequences.title": { fr: "Où créer les séquences ?", en: "Where should sequences be created?" },
+    "sequences.number": { fr: "Première séquence", en: "First sequence" },
+    "sequences.numberHelp": { fr: "Premier numéro réservé dans le DataPool. Les séquences de régions, layers, répétitions et bumps suivent cette base.", en: "First number reserved in the DataPool. Region, layer, repeat and bump sequences follow this base." },
+    "sequences.namePrefix": { fr: "Préfixe de toutes les séquences", en: "All-sequence prefix" },
+    "sequences.namePrefixHelp": { fr: "Ajouté devant chaque nom généré. Les exemples ci-dessous utilisent réellement les noms détectés dans votre CSV.", en: "Added before every generated name. The examples below use names actually detected in your CSV." },
+    "sequences.repeatPrefix": { fr: "Préfixe répétitions et bumps", en: "Repeat and bump prefix" },
+    "sequences.repeatPrefixHelp": { fr: "Distingue les séquences créées à partir des couleurs répétées et des marqueurs Temp / Flash.", en: "Distinguishes sequences created from repeated colors and Temp / Flash markers." },
+    "sequences.appearance": { fr: "Premier Appearance ID", en: "First Appearance ID" },
+    "sequences.appearanceHelp": { fr: "Premier identifiant grandMA3 utilisé pour reproduire les couleurs REAPER sans écraser vos appearances précédentes.", en: "First grandMA3 ID used to reproduce REAPER colors without overwriting earlier appearances." },
+    "sequences.speed": { fr: "Speed Master 3.x", en: "Speed Master 3.x" },
+    "sequences.speedHelp": { fr: "Speed Master assigné à toutes les séquences générées ; choisissez ici la partie x de 3.x.", en: "Speed Master assigned to every generated sequence; choose the x part of 3.x here." },
+    "output.title": { fr: "Que doit contenir l’export ?", en: "What should the export contain?" },
+    "output.full": { fr: "Cues et timecode", en: "Cues and timecode" },
+    "output.cues": { fr: "Cues uniquement", en: "Cues only" },
+    "output.fullHelp": { fr: "Séquences, objet Timecode, tracks et événements", en: "Sequences, Timecode object, tracks and events" },
+    "output.cuesHelp": { fr: "Séquences seules, sans objet Timecode ni événement", en: "Sequences only, without a Timecode object or events" },
+    "output.timecodeNumber": { fr: "Numéro de l’objet Timecode", en: "Timecode object number" },
+    "output.timecodeNumberHelp": { fr: "Emplacement de l’objet Timecode créé dans le DataPool ; il est indépendant du slot qui transporte le signal entrant.", en: "Location of the generated Timecode object in the DataPool; it is independent from the slot carrying the incoming signal." },
+    "output.incomingSlot": { fr: "Slot du timecode entrant (TCSlot)", en: "Incoming timecode slot (TCSlot)" },
+    "output.incomingSlotHelp": { fr: "Slot LTC externe qui reçoit votre source audio/timecode. Les macros LTC et le restore automatique utiliseront ce numéro.", en: "External LTC slot receiving your audio/timecode source. LTC macros and automatic restore use this number." },
+    "executors.title": { fr: "Assigner les séquences aux executors ?", en: "Assign sequences to executors?" },
+    "executors.assign": { fr: "Utiliser des executors", en: "Use executors" },
+    "executors.assignHelp": { fr: "Si activé, le macro place automatiquement les séquences sur la page et les slots choisis.", en: "When enabled, the macro automatically places sequences on the selected page and slots." },
+    "executors.regionPerPage": { fr: "Une région par page", en: "One region per page" },
+    "executors.regionPerPageHelp": { fr: "La première région utilise la page de départ, puis chaque région passe à la page suivante. Les slots principaux et bump repartent de leur valeur de départ sur chaque page. Les éventuelles séquences globales restent sur la première page.", en: "The first region uses the starting page, then each region moves to the next page. Main and bump slots restart from their configured values on every page. Any global sequences remain on the first page." },
+    "executors.page": { fr: "Page de départ", en: "Starting page" },
+    "executors.pageHelp": { fr: "En mode continu, toutes les assignations utilisent cette page. Avec une région par page, la première région commence ici et les suivantes avancent d’une page.", en: "In continuous mode, every assignment uses this page. With one region per page, the first region starts here and following regions advance one page at a time." },
+    "executors.main": { fr: "Premier slot principal", en: "First main slot" },
+    "executors.mainHelp": { fr: "Premier executor utilisé pour la séquence principale, les régions et les layers. Avec une région par page, ce slot est réutilisé au début de chaque nouvelle page.", en: "First executor used for the main sequence, regions, and layers. With one region per page, this slot is reused at the start of every new page." },
+    "executors.bump": { fr: "Premier slot bump", en: "First bump slot" },
+    "executors.bumpHelp": { fr: "Premier executor de la zone réservée aux séquences Temp et Flash. Avec une région par page, ce slot est réutilisé sur chaque nouvelle page.", en: "First executor in the area reserved for Temp and Flash sequences. With one region per page, this slot is reused on every new page." },
+    "executors.preview": { fr: "Plan d’assignation", en: "Assignment plan" },
+    "executors.previewHelp": { fr: "Chaque adresse ci-dessous sera écrite par le macro dans grandMA3.", en: "Each address below will be written by the macro in grandMA3." },
+    "executors.sequenceCount": { fr: "séquence(s)", en: "sequence(s)" },
+    "extras.title": { fr: "Ajouter des macros utiles ?", en: "Add helper macros?" },
+    "extras.showTime": { fr: "Show Time", en: "Show Time" },
+    "extras.showTimeHelp": { fr: "Ajoute les macros qui affichent et restaurent la source de timecode du show.", en: "Adds macros that show and restore the show's timecode source." },
+    "extras.timecodeControl": { fr: "Timecode Control", en: "Timecode Control" },
+    "extras.timecodeControlHelp": { fr: "Ajoute les macros de bascule entre le slot interne grandMA3 et le slot LTC entrant.", en: "Adds macros that switch between the grandMA3 internal slot and incoming LTC slot." },
+    "extras.reaper": { fr: "Transport REAPER", en: "REAPER transport" },
+    "extras.reaperHelp": { fr: "Ajoute les commandes OSC pour piloter le transport REAPER depuis grandMA3.", en: "Adds OSC commands for controlling REAPER transport from grandMA3." },
+    "extras.version": { fr: "Version grandMA3", en: "grandMA3 version" },
+    "extras.versionHelp": { fr: "Détermine le slot interne : −2 avant la 2.4, −1 à partir de la 2.4.", en: "Determines the internal slot: −2 before 2.4, −1 from 2.4 onward." },
+    "extras.ltcSlot": { fr: "Slot LTC externe", en: "External LTC slot" },
+    "extras.ltcSlotReview": { fr: "Choisi à l’étape Sortie", en: "Selected in the Output step" },
+    "extras.internalSlot": { fr: "Slot interne calculé", en: "Resolved internal slot" },
+    "extras.oscSlot": { fr: "OSC Slot ID", en: "OSC Slot ID" },
+    "extras.oscSlotHelp": { fr: "Identifiant de la configuration OSC grandMA3 qui envoie les commandes vers REAPER.", en: "ID of the grandMA3 OSC configuration that sends commands to REAPER." },
+    "extras.oscName": { fr: "Nom OSC", en: "OSC name" },
+    "extras.oscNameHelp": { fr: "Nom lisible utilisé dans les macros et labels de la configuration OSC.", en: "Readable name used in the OSC configuration macros and labels." },
+    "extras.macroPrefix": { fr: "Préfixe des macros", en: "Macro prefix" },
+    "extras.macroPrefixHelp": { fr: "Texte ajouté devant Play, Stop, Pause et les autres macros REAPER.", en: "Text added before Play, Stop, Pause and the other REAPER macros." },
+    "extras.outputFile": { fr: "Nom du fichier transport", en: "Transport filename" },
+    "extras.outputFileHelp": { fr: "Nom du fichier XML ajouté au ZIP pour cette bibliothèque de transport.", en: "Name of the XML file added to the ZIP for this transport library." },
+    "review.title": { fr: "Tout est prêt", en: "Everything is ready" },
+    "review.copy": { fr: "Vérifiez le résumé puis téléchargez l’archive.", en: "Review the summary, then download the archive." },
+    "review.download": { fr: "Télécharger le ZIP", en: "Download ZIP" },
+    "review.files": { fr: "Fichiers générés", en: "Generated files" },
+    "review.sequences": { fr: "Séquences générées", en: "Generated sequences" },
+    "review.mainCues": { fr: "Cues principaux", en: "Main cues" },
+    "review.durationSeconds": { fr: "Durée totale", en: "Total duration" },
+    "review.durationClock": { fr: "Durée H:i:s", en: "H:i:s duration" },
+    "review.timecodeEditable": { fr: "Modifiable ici une dernière fois. Le nom pilote les références et labels grandMA3.", en: "Editable here one last time. This name drives grandMA3 references and labels." },
+    "review.downloaded": { fr: "Archive générée et projet sauvegardé.", en: "Archive generated and project saved." },
+    "summary.title": { fr: "Configuration complète", en: "Complete configuration" },
+    "summary.copy": { fr: "Tous les réglages qui seront appliqués à l’export.", en: "Every setting that will be applied to the export." },
+    "summary.cuesRegions": { fr: "Régions et cues", en: "Regions and cues" },
+    "summary.sequences": { fr: "Séquences", en: "Sequences" },
+    "summary.output": { fr: "Sortie et timecode", en: "Output and timecode" },
+    "summary.executors": { fr: "Executors", en: "Executors" },
+    "summary.extras": { fr: "Macros additionnelles", en: "Additional macros" },
+    "summary.importMode": { fr: "Organisation", en: "Organization" },
+    "summary.exportMode": { fr: "Contenu du ZIP", en: "ZIP contents" },
+    "summary.executorLayout": { fr: "Organisation des pages", en: "Page layout" },
+    "summary.assignments": { fr: "Assignations générées", en: "Generated assignments" },
+    "summary.yes": { fr: "Oui", en: "Yes" },
+    "summary.no": { fr: "Non", en: "No" },
+    "summary.perRegion": { fr: "Séquences par région", en: "Sequences per region" },
+    "summary.classic": { fr: "Mode classique", en: "Classic mode" },
+    "summary.continuous": { fr: "Placement continu sur une page", en: "Continuous placement on one page" },
+    "summary.notCreated": { fr: "Non créé", en: "Not created" },
+    "timeline.title": { fr: "Timeline du projet", en: "Project timeline" },
+    "timeline.scope": { fr: "Région affichée", en: "Displayed region" },
+    "timeline.focusedMarker": { fr: "Marqueur ciblé", en: "Focused marker" },
+    "timeline.source": { fr: "Source REAPER", en: "REAPER source" },
+    "timeline.output": { fr: "Sortie grandMA3", en: "grandMA3 output" },
+    "timeline.fit": { fr: "Ajuster", en: "Fit" },
+    "timeline.empty": { fr: "Aucun événement à afficher.", en: "No events to display." },
+    "timeline.zoom": { fr: "Zoom de la timeline", en: "Timeline zoom" },
+    "timeline.legend": { fr: "Légende de la timeline", en: "Timeline legend" },
+    "stage.source": { fr: "Fichier", en: "File" },
+    "stage.analysis": { fr: "Analyse", en: "Analysis" },
+    "stage.cues": { fr: "Cues", en: "Cues" },
+    "stage.sequences": { fr: "Séquences", en: "Sequences" },
+    "stage.output": { fr: "Sortie", en: "Output" },
+    "stage.executors": { fr: "Executors", en: "Executors" },
+    "stage.extras": { fr: "Extras", en: "Extras" },
+    "stage.review": { fr: "Vérification", en: "Review" },
+    "history.empty": { fr: "Aucune version enregistrée.", en: "No saved version." },
+    "history.restore": { fr: "Restaurer", en: "Restore" },
+    "storage.title": { fr: "Stockage local", en: "Local storage" },
+    "storage.warning": { fr: "L’espace local commence à manquer. Exportez ou supprimez des projets.", en: "Local space is running low. Export or delete projects." },
+    "error.generic": { fr: "Une erreur est survenue. Réessayez.", en: "Something went wrong. Try again." },
+} as const;
+
+export type MessageKey = keyof typeof messages;
+
+type I18nContextValue = {
+    locale: Locale;
+    setLocale: (locale: Locale) => void;
+    t: (key: MessageKey) => string;
+};
+
+const I18nContext = createContext<I18nContextValue | undefined>(undefined);
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+    const [locale, setLocale] = useState<Locale>(() => readPreferences().locale ?? (navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en"));
+
+    useEffect(() => {
+        document.documentElement.lang = locale;
+        writePreferences({ locale });
+    }, [locale]);
+
+    const value = useMemo<I18nContextValue>(() => ({ locale, setLocale, t: (key) => messages[key][locale] }), [locale]);
+    return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n(): I18nContextValue {
+    const value = useContext(I18nContext);
+    if (!value) throw new Error("useI18n must be used inside I18nProvider.");
+    return value;
+}
+
+export function readPreferences(): { locale?: Locale; theme?: "system" | "light" | "dark" } {
+    try {
+        return JSON.parse(localStorage.getItem("reaper2ma:ui:v1") ?? "{}") as { locale?: Locale; theme?: "system" | "light" | "dark" };
+    } catch {
+        return {};
+    }
+}
+
+export function writePreferences(patch: { locale?: Locale; theme?: "system" | "light" | "dark" }) {
+    localStorage.setItem("reaper2ma:ui:v1", JSON.stringify({ ...readPreferences(), ...patch }));
+}

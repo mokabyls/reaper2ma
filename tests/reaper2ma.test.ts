@@ -11,11 +11,14 @@ import {
     createInheritedRegionLayerColor,
 } from "../src/lib/reaper2ma/colors.js";
 import { createExportBundleFiles } from "../src/lib/reaper2ma/export-bundle.js";
+import { createExecutorAssignmentPreview } from "../src/lib/reaper2ma/executor-plan.js";
 import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
 import { createConversionPreview } from "../src/lib/reaper2ma/preview.js";
 import { resolveSpeedMaster } from "../src/lib/reaper2ma/settings.js";
 import { createTimelinePreview } from "../src/lib/reaper2ma/timeline-preview.js";
+import { analyzeReaperCsv, analyzeReaperCsvProgressively, type ReaperAnalysisPhase } from "../src/lib/reaper2ma/analysis.js";
+import { createProjectOutputBaseName } from "../src/lib/reaper2ma/filename.js";
 import { createReaperTransportMacroOutputFile, generateReaperTransportMacros } from "../src/lib/reaper2ma/transport-macros.js";
 import { bpmTagProvider } from "../src/lib/reaper2ma/providers/bpm.js";
 import { cueFadeTagProvider } from "../src/lib/reaper2ma/providers/cue-fade.js";
@@ -1991,6 +1994,35 @@ R2,Region Two,5,10,5,
         assert.equal(commands.includes('Assign DataPool "R2MA noexecutors" Sequence 1 Cue 1 At Timecode 1.1.1.1.1.1'), true);
     });
 
+    it("can restart executor slots on one page per region", () => {
+        const csv = `#,Name,Start,End,Length,Color
+R1,Verse,0,10,10,
+R2,Chorus,10,20,10,
+M1,Verse Cue,2,,,
+M2,[LAYER=FX] Hit,4,,,F2FF00
+M3,Chorus Cue,12,,,
+`;
+        const settings: ConversionSettings = {
+            ...baseSettings,
+            importMode: "regions-and-markers",
+            pageNumber: 3,
+            executorLayout: "region-per-page",
+        };
+        const artifacts = convertReaperCsvToArtifacts(csv, "region-page.csv", settings);
+        const commands = getMacroCommands(artifacts.macroXml);
+        const assignments = createExecutorAssignmentPreview(artifacts, settings);
+
+        assert.deepEqual(
+            assignments.map((assignment) => [assignment.sequenceNumber, assignment.pageNumber, assignment.slotNumber]),
+            [[9002, 3, 201], [9003, 3, 202], [9004, 4, 201]],
+        );
+        assert.equal(commands.includes('Assign DataPool "R2MA regionpage" Sequence 1 At Page 3.201'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA regionpage" Sequence 2 At Page 3.202'), true);
+        assert.equal(commands.includes('Assign DataPool "R2MA regionpage" Sequence 3 At Page 4.201'), true);
+        assert.equal(commands.includes('Label Page 3 "regionpage - Verse"'), true);
+        assert.equal(commands.includes('Label Page 4 "regionpage - Chorus"'), true);
+    });
+
     it("emits timed OffCue setup from inline, paired, fallback and Flash release tags", () => {
         const inlineCsv = `#,Name,Start,Color
 1,[Temp|Release_250] HIT,0,19005190
@@ -2374,5 +2406,118 @@ describe("zip export bundle", () => {
         ]);
         assert.equal(withoutTransport.some((file) => file.name === "transport.xml"), false);
         assert.equal(withTransport.at(-1)?.content.includes('Macro Name="REAPER - PLAY"'), true);
+    });
+});
+
+describe("React conversion request", () => {
+    it("keeps project filenames independent from grandMA3 object names", () => {
+        const artifacts = convertReaperCsvToArtifacts({
+            csvText: fixtureCsv,
+            sourceFileName: "reaper-export.csv",
+            identity: {
+                projectName: "Traversée V2",
+                timecodeName: "TC Principal",
+            },
+            settings: baseSettings,
+        });
+
+        assert.equal(createProjectOutputBaseName("Traversée V2"), "traversee-v2");
+        assert.equal(artifacts.outputBaseName, "traversee-v2");
+        assert.equal(artifacts.grandmaName, "TC Principal");
+        assert.equal(createConversionOutputFiles(artifacts)[0]?.name, "traversee-v2_macro.xml");
+        assert.equal(artifacts.macroXml.includes("TC Principal"), true);
+        assert.equal(artifacts.macroXml.includes("reaper-export"), false);
+    });
+
+    it("keeps the historical three-argument naming behavior", () => {
+        const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
+
+        assert.equal(artifacts.outputBaseName, "songcsv");
+        assert.equal(artifacts.grandmaName, "songcsv");
+    });
+});
+
+describe("pre-conversion CSV analysis", () => {
+    it("creates a visual default group without enabling region conversion", () => {
+        const analysis = analyzeReaperCsv(fixtureCsv);
+
+        assert.equal(analysis.regionCount, 0);
+        assert.equal(analysis.recommendedImportMode, "markers-only");
+        assert.equal(analysis.regions.length, 1);
+        assert.equal(analysis.regions[0]?.isSynthetic, true);
+        assert.equal(analysis.regions[0]?.markers.length, analysis.markerCount);
+        assert.equal(analysis.globalMarkers.length, 0);
+    });
+
+    it("keeps markers outside real regions in the global group", () => {
+        const csv = [
+            "#,Name,Start,End,Length,Color",
+            "R1,Intro,10,20,10,16711680",
+            "M1,Before,5,,,",
+            "M2,Inside,12,,,",
+            "M3,After,22,,,",
+        ].join("\n");
+        const analysis = analyzeReaperCsv(csv);
+
+        assert.equal(analysis.regionCount, 1);
+        assert.equal(analysis.recommendedImportMode, "regions-and-markers");
+        assert.deepEqual(analysis.regions[0]?.markers.map((marker) => marker.name), ["Inside"]);
+        assert.deepEqual(analysis.globalMarkers.map((marker) => marker.name), ["Before", "After"]);
+    });
+
+    it("assigns markers in nested regions to the innermost region", () => {
+        const csv = [
+            "#,Name,Start,End,Length,Color",
+            "R1,Outer,0,100,100,",
+            "R2,Inner,10,20,10,",
+            "M1,Deep,12,,,",
+            "M2,Outer only,30,,,",
+        ].join("\n");
+        const analysis = analyzeReaperCsv(csv);
+
+        assert.deepEqual(analysis.regions.find((region) => region.label === "Inner")?.markers.map((marker) => marker.name), ["Deep"]);
+        assert.deepEqual(analysis.regions.find((region) => region.label === "Outer")?.markers.map((marker) => marker.name), ["Outer only"]);
+    });
+
+    it("reports progressive work phases in order and returns the same analysis", async () => {
+        const phases: ReaperAnalysisPhase[] = [];
+        const progressive = await analyzeReaperCsvProgressively(fixtureCsv, (phase) => phases.push(phase));
+
+        assert.deepEqual(phases, ["validation", "regions", "markers", "preview"]);
+        assert.deepEqual(progressive, analyzeReaperCsv(fixtureCsv));
+    });
+});
+
+describe("grandMA timecode slot profiles", () => {
+    const selection = { showTime: true, timecodeControl: true };
+
+    it("uses internal slot -2 before grandMA3 2.4", () => {
+        const files = createExampleMacroPresetOutputFiles({
+            sourceFileName: "show.csv",
+            timecodeName: "Show",
+            selection,
+            grandmaVersion: "pre-2.4",
+            externalTimecodeSlot: 7,
+        });
+        const commands = files.flatMap((file) => getMacroCommands(file.content));
+
+        assert.equal(commands.some((command) => command === 'Set Timecode "Show" "TCSlot" -2'), true);
+        assert.equal(commands.some((command) => command === 'Set Timecode "Show" "TCSlot" 7'), true);
+        assert.equal(commands.some((command) => command === 'Set Timecode "Show" "TCSlot" -1'), false);
+    });
+
+    it("uses internal slot -1 from grandMA3 2.4 onward and preserves the chosen LTC slot", () => {
+        const files = createExampleMacroPresetOutputFiles({
+            sourceFileName: "show.csv",
+            timecodeName: "Show",
+            selection,
+            grandmaVersion: "2.4+",
+            externalTimecodeSlot: 9,
+        });
+        const commands = files.flatMap((file) => getMacroCommands(file.content));
+
+        assert.equal(commands.some((command) => command === 'Set Timecode "Show" "TCSlot" -1'), true);
+        assert.equal(commands.some((command) => command === 'Set Timecode "Show" "TCSlot" 9'), true);
+        assert.equal(commands.some((command) => command === 'Set Timecode "Show" "TCSlot" -2'), false);
     });
 });

@@ -1,5 +1,21 @@
 export type ExportMode = "cues-and-timecode" | "cues-only";
 export type ImportMode = "markers-only" | "regions-and-markers";
+export type GrandmaVersionProfile = "pre-2.4" | "2.4+";
+
+export type ConversionDiagnosticCode =
+    | "csv.missing-headers"
+    | "csv.invalid-timestamp"
+    | "conversion.empty-main-sequence"
+    | "conversion.no-regions"
+    | "conversion.no-markers"
+    | "conversion.warning";
+
+export type ConversionDiagnostic = {
+    code: ConversionDiagnosticCode;
+    severity: "warning" | "error";
+    params?: Record<string, string | number>;
+    message: string;
+};
 
 export type ReaperMarkerRow = {
     "#": string;
@@ -205,6 +221,8 @@ export type BpmSequence = {
     sequenceNumber: number;
 };
 
+export type ExecutorLayout = "continuous" | "region-per-page";
+
 export type ConversionSettings = {
     importMode?: ImportMode;
     sequenceNumber: number;
@@ -215,6 +233,7 @@ export type ConversionSettings = {
     pageSlotStart: number;
     bumpPageSlotStart: number;
     assignExecutors: boolean;
+    executorLayout?: ExecutorLayout;
     cueStartNumber: number;
     regionEndPreRollMs: number;
     autoOffRegionLayers: boolean;
@@ -223,6 +242,19 @@ export type ConversionSettings = {
     speedMaster: string;
     prefix: string;
     exportMode: ExportMode;
+};
+
+export type ConversionIdentity = {
+    projectName: string;
+    timecodeName: string;
+    outputBaseName?: string;
+};
+
+export type ReaperCsvConversionRequest = {
+    csvText: string;
+    sourceFileName: string;
+    settings: ConversionSettings;
+    identity: ConversionIdentity;
 };
 
 export type ExampleMacroPresetGroupId = "show-time" | "timecode-control";
@@ -242,6 +274,8 @@ export type ExampleMacroPresetSelection = {
 
 export type ExampleMacroPresetContext = {
     timecodeName: string;
+    internalTimecodeSlot: -2 | -1;
+    externalTimecodeSlot: number;
 };
 
 export type ExampleMacroPresetDefinition = {
@@ -269,7 +303,9 @@ export type ExampleMacroPresetOutputFile = {
 export type ConversionArtifacts = {
     importMode: ImportMode;
     outputBaseName: string;
+    grandmaName: string;
     validationWarnings: string[];
+    diagnostics: ConversionDiagnostic[];
     regionSequences: RegionSequence[];
     regionLayerSequences: RegionLayerSequence[];
     uniqueCues: ConvertedMarker[];

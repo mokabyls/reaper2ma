@@ -1,6 +1,6 @@
 import { buildOutputFileName } from "./filename.js";
 import { calculateTimecodeDuration, collectTimecodeTimestamps } from "./timecode-duration.js";
-import type { ConversionArtifacts } from "./types.js";
+import type { ConversionArtifacts, ConversionDiagnostic } from "./types.js";
 
 export type ConversionPreview = {
     importMode: string;
@@ -17,6 +17,7 @@ export type ConversionPreview = {
     generatedSequenceNames: string[];
     outputFileNames: string[];
     warnings: string[];
+    diagnostics: ConversionDiagnostic[];
 };
 
 export function createConversionPreview(artifacts: ConversionArtifacts, sourceMarkerCount: number): ConversionPreview {
@@ -41,17 +42,24 @@ export function createConversionPreview(artifacts: ConversionArtifacts, sourceMa
     ];
     const appearanceCount = collectAppearanceNumbers(artifacts).size;
     const warnings: string[] = [...(artifacts.validationWarnings ?? [])];
+    const diagnostics: ConversionDiagnostic[] = [...(artifacts.diagnostics ?? [])];
 
     if (artifacts.uniqueCues.length === 0) {
-        warnings.push("The main sequence is empty: no cues will be created in the base sequence.");
+        const message = "The main sequence is empty: no cues will be created in the base sequence.";
+        warnings.push(message);
+        diagnostics.push({ code: "conversion.empty-main-sequence", severity: "warning", message });
     }
 
     if (artifacts.importMode === "regions-and-markers" && artifacts.regionSequences.length === 0) {
-        warnings.push("Regions + markers mode is selected, but no valid region was found in the CSV.");
+        const message = "Regions + markers mode is selected, but no valid region was found in the CSV.";
+        warnings.push(message);
+        diagnostics.push({ code: "conversion.no-regions", severity: "warning", message });
     }
 
     if (sourceMarkerCount === 0) {
-        warnings.push("No markers were found in the CSV.");
+        const message = "No markers were found in the CSV.";
+        warnings.push(message);
+        diagnostics.push({ code: "conversion.no-markers", severity: "warning", message });
     }
 
     return {
@@ -69,6 +77,7 @@ export function createConversionPreview(artifacts: ConversionArtifacts, sourceMa
         generatedSequenceNames,
         outputFileNames: [buildOutputFileName(artifacts.outputBaseName, "macro")],
         warnings,
+        diagnostics,
     };
 }
 

@@ -2,8 +2,17 @@ import { createAppearanceNameFromReaperColor, convertReaperColorToGrandmaAppeara
 import { attachCuePartMarkers, splitCuePartMarkers } from "./cue-parts.js";
 import { validateReaperCsvRows } from "./csv-validation.js";
 import { assignMarkersToRegions, buildRegionSequences, parseRegions, type ParsedRegion } from "./region-services.js";
-import type { AppearanceReference, BpmSequenceSource, ConversionArtifacts, ConversionSettings, ConvertedMarker, ReaperRegionRow } from "./types.js";
-import { buildOutputFileName, normalizeOutputBaseName } from "./filename.js";
+import type {
+    AppearanceReference,
+    BpmSequenceSource,
+    ConversionArtifacts,
+    ConversionDiagnostic,
+    ConversionSettings,
+    ConvertedMarker,
+    ReaperCsvConversionRequest,
+    ReaperRegionRow,
+} from "./types.js";
+import { buildOutputFileName, createProjectOutputBaseName, normalizeOutputBaseName, sanitizeGrandmaObjectName } from "./filename.js";
 import {
     createBpmSequence,
     groupBumpSequences,
@@ -21,17 +30,32 @@ export function convertReaperMarkersToArtifacts(
     sourceFileName: string,
     settings: ConversionSettings,
 ): ConversionArtifacts {
-    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], sourceFileName, settings, []);
+    const outputBaseName = normalizeOutputBaseName(sourceFileName);
+    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, [], outputBaseName, outputBaseName, settings, []);
 }
 
-export function convertReaperCsvToArtifacts(dataString: string, sourceFileName: string, settings: ConversionSettings): ConversionArtifacts {
+export function convertReaperCsvToArtifacts(request: ReaperCsvConversionRequest): ConversionArtifacts;
+export function convertReaperCsvToArtifacts(dataString: string, sourceFileName: string, settings: ConversionSettings): ConversionArtifacts;
+export function convertReaperCsvToArtifacts(
+    requestOrDataString: ReaperCsvConversionRequest | string,
+    legacySourceFileName?: string,
+    legacySettings?: ConversionSettings,
+): ConversionArtifacts {
+    const request = resolveConversionRequest(requestOrDataString, legacySourceFileName, legacySettings);
+    const { csvText: dataString, sourceFileName, settings } = request;
     const { headers, rows } = parseReaperMarkerCsv(dataString);
     const validationWarnings = validateReaperCsvRows(headers, rows);
     const regionRows = settings.importMode === "regions-and-markers" ? rows.filter(isRegionRow) : [];
     const markerRows = rows.filter((row) => !isRegionRow(row));
     const normalizedMarkers = normalizeMarkerRows(markerRows);
+    const outputBaseName = request.identity
+        ? request.identity.outputBaseName?.trim() || createProjectOutputBaseName(request.identity.projectName)
+        : normalizeOutputBaseName(sourceFileName);
+    const grandmaName = request.identity
+        ? sanitizeGrandmaObjectName(request.identity.timecodeName, outputBaseName)
+        : outputBaseName;
 
-    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, sourceFileName, settings, validationWarnings);
+    return convertMarkersAndRegionsToArtifacts(normalizedMarkers, regionRows, outputBaseName, grandmaName, settings, validationWarnings);
 }
 
 export function createConversionOutputFiles(artifacts: ConversionArtifacts) {
@@ -46,23 +70,24 @@ export function createConversionOutputFiles(artifacts: ConversionArtifacts) {
 function convertMarkersAndRegionsToArtifacts(
     normalizedMarkers: ConvertedMarker[],
     regionRows: ReaperRegionRow[],
-    sourceFileName: string,
+    outputBaseName: string,
+    grandmaName: string,
     settings: ConversionSettings,
     validationWarnings: string[],
 ): ConversionArtifacts {
     const appearanceRegistry = createAppearanceRegistry(settings.appearanceStartNumber);
-    const outputBaseName = normalizeOutputBaseName(sourceFileName);
 
     if (settings.importMode === "regions-and-markers" && regionRows.length > 0) {
-        return convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, settings, appearanceRegistry, validationWarnings);
+        return convertHybridArtifacts(normalizedMarkers, regionRows, outputBaseName, grandmaName, settings, appearanceRegistry, validationWarnings);
     }
 
-    return convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, settings, appearanceRegistry, validationWarnings);
+    return convertMarkersOnlyArtifacts(normalizedMarkers, outputBaseName, grandmaName, settings, appearanceRegistry, validationWarnings);
 }
 
 function convertMarkersOnlyArtifacts(
     normalizedMarkers: ConvertedMarker[],
     outputBaseName: string,
+    grandmaName: string,
     settings: ConversionSettings,
     appearanceRegistry: ReturnType<typeof createAppearanceRegistry>,
     validationWarnings: string[],
@@ -106,13 +131,17 @@ function convertMarkersOnlyArtifacts(
         prefixed.repeatedSequences,
         prefixed.bumpSequences,
         prefixed.bpmSequence,
-        outputBaseName,
+        grandmaName,
     );
+
+    const allWarnings = [...validationWarnings, ...regionLayerWarnings, ...cuePartWarnings, ...bumpReleaseWarnings];
 
     return {
         importMode: settings.importMode ?? "markers-only",
         outputBaseName,
-        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...cuePartWarnings, ...bumpReleaseWarnings],
+        grandmaName,
+        validationWarnings: allWarnings,
+        diagnostics: createLegacyDiagnostics(allWarnings),
         regionSequences: prefixed.regionSequences,
         regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,
@@ -127,6 +156,7 @@ function convertHybridArtifacts(
     normalizedMarkers: ConvertedMarker[],
     regionRows: ReaperRegionRow[],
     outputBaseName: string,
+    grandmaName: string,
     settings: ConversionSettings,
     appearanceRegistry: ReturnType<typeof createAppearanceRegistry>,
     validationWarnings: string[],
@@ -197,13 +227,17 @@ function convertHybridArtifacts(
         prefixed.repeatedSequences,
         prefixed.bumpSequences,
         prefixed.bpmSequence,
-        outputBaseName,
+        grandmaName,
     );
+
+    const allWarnings = [...validationWarnings, ...regionLayerWarnings, ...cuePartWarnings, ...bumpReleaseWarnings];
 
     return {
         importMode: settings.importMode ?? "regions-and-markers",
         outputBaseName,
-        validationWarnings: [...validationWarnings, ...regionLayerWarnings, ...cuePartWarnings, ...bumpReleaseWarnings],
+        grandmaName,
+        validationWarnings: allWarnings,
+        diagnostics: createLegacyDiagnostics(allWarnings),
         regionSequences: prefixed.regionSequences,
         regionLayerSequences: prefixed.regionLayerSequences,
         uniqueCues,
@@ -212,6 +246,34 @@ function convertHybridArtifacts(
         bpmSequence: prefixed.bpmSequence,
         macroXml,
     };
+}
+
+function resolveConversionRequest(
+    requestOrDataString: ReaperCsvConversionRequest | string,
+    legacySourceFileName: string | undefined,
+    legacySettings: ConversionSettings | undefined,
+): Omit<ReaperCsvConversionRequest, "identity"> & { identity?: ReaperCsvConversionRequest["identity"] } {
+    if (typeof requestOrDataString !== "string") {
+        return requestOrDataString;
+    }
+
+    if (!legacySourceFileName || !legacySettings) {
+        throw new TypeError("Legacy conversion requires CSV text, source filename and settings.");
+    }
+
+    return {
+        csvText: requestOrDataString,
+        sourceFileName: legacySourceFileName,
+        settings: legacySettings,
+    };
+}
+
+function createLegacyDiagnostics(warnings: string[]): ConversionDiagnostic[] {
+    return warnings.map((message) => ({
+        code: message.includes("seconds") ? "csv.invalid-timestamp" : "conversion.warning",
+        severity: "warning",
+        message,
+    }));
 }
 
 function collectBumpReleaseWarnings(bumpSequences: ConversionArtifacts["bumpSequences"]): string[] {

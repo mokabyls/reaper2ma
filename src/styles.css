@@ -290,6 +290,14 @@ select, input[type="text"], input[type="number"], input[type="search"] { color: 
 .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .output-fields { margin-top: 28px; margin-bottom: 4px; padding-top: 26px; border-top: 1px solid var(--border); }
 .output-fields > :only-child { grid-column: 1 / -1; }
+.timecode-offset-field { grid-column: 1 / -1; padding: 17px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-soft); }
+.timecode-offset-field > input { background: var(--surface-solid); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.timecode-offset-field > input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--danger) 62%, var(--border)); outline-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.timecode-offset-example { margin: 2px 0 0; color: var(--muted); font-size: .78rem; font-weight: 500; line-height: 1.55; }
+.timecode-offset-example code { padding: 3px 6px; border-radius: 6px; background: var(--surface-solid); color: var(--text); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: .73rem; }
+.field-error, .field-warning { display: block; padding: 9px 11px; border-radius: 10px; }
+.field-error { color: var(--danger) !important; background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.field-warning { color: var(--warning) !important; background: color-mix(in srgb, var(--warning) 9%, transparent); }
 .settings-section { display: grid; gap: 12px; margin: 4px 0; padding: 8px 0; }
 .toggle-row { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 13px 16px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-solid); }
 .toggle-copy { min-width: 0; display: flex; align-items: center; gap: 8px; }
@@ -304,11 +312,14 @@ select, input[type="text"], input[type="number"], input[type="search"] { color: 
 .reveal-panel { animation: reveal-panel .34s cubic-bezier(.22,1,.36,1) both; }
 @keyframes reveal-panel { from { opacity: 0; transform: translateY(-7px); } to { opacity: 1; transform: translateY(0); } }
 .generated-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.generated-examples.standalone { padding: 2px 5px 0; }
 .generated-examples small { margin-right: 2px; }
 .generated-examples code { max-width: 100%; padding: 5px 8px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .68rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .resolved-field { display: grid; align-content: center; gap: 7px; min-height: 72px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-soft); }
 .resolved-field span { color: var(--muted); font-size: .78rem; font-weight: 700; }
 .resolved-field small { color: var(--subtle); font-size: .7rem; }
+.optional-prefix-setting { grid-column: 1 / -1; display: grid; gap: 10px; }
+.optional-prefix-field { padding: 15px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-soft); }
 .advanced-details { margin: 20px 0; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-soft); }
 .advanced-details summary { cursor: pointer; font-weight: 750; }
 .executor-layout-option { margin: 22px 0 4px; }
@@ -417,7 +428,8 @@ select, input[type="text"], input[type="number"], input[type="search"] { color: 
 .timeline-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 10px; }
 .timeline-modal-header h2 { margin: 0; }
 .timeline-modal-header .eyebrow { margin-bottom: 3px; }
-.timeline-scope-label { margin: 5px 0 0; color: var(--muted); font-size: .78rem; }
+.timeline-offset-label, .timeline-scope-label { margin: 5px 0 0; color: var(--muted); font-size: .78rem; }
+.timeline-offset-label strong { color: var(--text); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: .75rem; font-variant-numeric: tabular-nums; }
 .timeline-focus-label { width: fit-content; margin: 7px 0 0; padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); font-size: .72rem; }
 .timeline-focus-label strong { color: var(--text); }
 .timeline-tabs { margin: 0 22px 12px; align-self: start; }

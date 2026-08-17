@@ -97,7 +97,7 @@ export function groupRepeatedSequences(
         const sequenceAppearanceReference = appearanceReference ?? fallbackAppearanceReference;
         const repeatedSequence: RepeatedSequence = {
             color: marker.color,
-            displayName: createUniqueSequenceName(`${prefix} - ${marker.displayName}`, usedSequenceNames),
+            displayName: createUniqueSequenceName(joinSequenceNameParts(prefix, marker.displayName), usedSequenceNames),
             cues: [
                 {
                     cueNumber: 1,
@@ -223,7 +223,7 @@ export function groupBumpSequences(
             const bumpSequence: BumpSequence = {
                 color: effectiveColor,
                 sourceName: marker.displayName,
-                displayName: createUniqueSequenceName(`${baseSequenceName} - BUMP - ${marker.displayName}`, usedSequenceNames),
+                displayName: createUniqueSequenceName(joinSequenceNameParts(baseSequenceName, "BUMP", marker.displayName), usedSequenceNames),
                 ...(regionScope
                     ? {
                           regionId: regionScope.regionId,
@@ -329,6 +329,10 @@ export function applySequenceNamePrefix(name: string, prefix: string): string {
     }
 
     return `${trimmedPrefix} ${name}`;
+}
+
+function joinSequenceNameParts(...parts: string[]): string {
+    return parts.map((part) => part.trim()).filter(Boolean).join(" - ");
 }
 
 function createUniqueSequenceName(name: string, usedSequenceNames: Map<string, number>): string {

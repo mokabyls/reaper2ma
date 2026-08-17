@@ -16,6 +16,7 @@ import { buildOutputFileName, normalizeOutputBaseName } from "../src/lib/reaper2
 import { createExampleMacroPresetOutputFiles, resolveExampleMacroTimecodeName } from "../src/lib/reaper2ma/macro-presets.js";
 import { createConversionPreview } from "../src/lib/reaper2ma/preview.js";
 import { resolveSpeedMaster } from "../src/lib/reaper2ma/settings.js";
+import { MAX_TIMECODE_OFFSET_MS, formatEffectiveTimecode, formatTimecodeOffset, formatTimecodeOffsetSeconds, parseTimecodeOffset } from "../src/lib/reaper2ma/timecode-offset.js";
 import { createTimelinePreview } from "../src/lib/reaper2ma/timeline-preview.js";
 import { analyzeReaperCsv, analyzeReaperCsvProgressively, type ReaperAnalysisPhase } from "../src/lib/reaper2ma/analysis.js";
 import { createProjectOutputBaseName } from "../src/lib/reaper2ma/filename.js";
@@ -88,6 +89,29 @@ function getTimecodeTrackCommands(commands: string[], tempDataPoolName: string, 
 
     return commands.slice(startIndex, nextAssignIndex === -1 ? undefined : nextAssignIndex);
 }
+
+describe("native grandMA3 timecode offset", () => {
+    it("parses and formats signed offsets with millisecond precision", () => {
+        assert.equal(parseTimecodeOffset("00:00:00"), 0);
+        assert.equal(parseTimecodeOffset("+01:00:00.000"), 3_600_000);
+        assert.equal(parseTimecodeOffset("-00:00:00.500"), -500);
+        assert.equal(parseTimecodeOffset("12:34:56.7"), 45_296_700);
+        assert.equal(parseTimecodeOffset("+255:59:58.960"), MAX_TIMECODE_OFFSET_MS);
+        assert.equal(parseTimecodeOffset("-255:59:58.960"), -MAX_TIMECODE_OFFSET_MS);
+        assert.equal(formatTimecodeOffset(undefined), "00:00:00.000");
+        assert.equal(formatTimecodeOffset(3_600_000), "+01:00:00.000");
+        assert.equal(formatTimecodeOffset(-500), "-00:00:00.500");
+        assert.equal(formatTimecodeOffsetSeconds(3_600_000), "3600");
+        assert.equal(formatTimecodeOffsetSeconds(-500), "-0.5");
+        assert.equal(formatEffectiveTimecode(3_660_000), "01:01:00.000");
+    });
+
+    it("rejects malformed and out-of-range offsets", () => {
+        for (const value of ["", "1:00", "1:00:00", "01:60:00", "01:00:60", "01:00:00.0000", "256:00:00", "+255:59:58.961", "timecode"]) {
+            assert.equal(parseTimecodeOffset(value), undefined, value);
+        }
+    });
+});
 
 function readUint32(bytes: Uint8Array, offset: number): number {
     return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, true);
@@ -580,6 +604,39 @@ describe("conversion artifacts", () => {
         assert.equal(artifacts.macroXml.includes("Drive"), false);
         assert.equal(artifacts.macroXml.includes("FaderSubTrack"), false);
         assert.equal(artifacts.macroXml.includes("ShowData.MediaPools.Sounds"), false);
+    });
+
+    it("sets a signed native offset after moving the Timecode object", () => {
+        const positive = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", { ...baseSettings, timecodeOffsetMs: 3_600_000 });
+        const positiveCommands = getMacroCommands(positive.macroXml);
+        const moveIndex = positiveCommands.indexOf('Move DataPool "R2MA songcsv" Timecode 1 Thru At Timecode 1');
+        const offsetIndex = positiveCommands.indexOf('Set Timecode 1 Property "Offset" "3600"');
+        const playbackIndex = positiveCommands.indexOf('Set Timecode 1 Property "PlaybackAndRecord" "Manual Events"');
+
+        assert.equal(moveIndex >= 0 && offsetIndex === moveIndex + 1 && playbackIndex === offsetIndex + 1, true);
+
+        const negative = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", { ...baseSettings, timecodeOffsetMs: -500 });
+        assert.equal(getMacroCommands(negative.macroXml).includes('Set Timecode 1 Property "Offset" "-0.5"'), true);
+    });
+
+    it("keeps historical XML unchanged at zero and omits the offset in cues-only mode", () => {
+        const legacy = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", baseSettings);
+        const explicitZero = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", { ...baseSettings, timecodeOffsetMs: 0 });
+        const cuesOnly = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", { ...baseSettings, exportMode: "cues-only", timecodeOffsetMs: 3_600_000 });
+
+        assert.equal(explicitZero.macroXml, legacy.macroXml);
+        assert.equal(getMacroCommands(explicitZero.macroXml).some((command) => command.includes('Property "Offset"')), false);
+        assert.equal(getMacroCommands(cuesOnly.macroXml).some((command) => command.includes('Property "Offset"')), false);
+    });
+
+    it("can omit the optional repeat and bump identifier without changing their grouping", () => {
+        const artifacts = convertReaperCsvToArtifacts(fixtureCsv, "Song 01.CSV", { ...baseSettings, prefix: "" });
+        const bumpArtifacts = convertReaperCsvToArtifacts("#,Name,Start,Color\n1,[Temp] HIT,0,16711680", "Bump.csv", { ...baseSettings, prefix: "" });
+
+        assert.equal(artifacts.repeatedSequences.length, 2);
+        assert.deepEqual(artifacts.repeatedSequences.map((sequence) => sequence.displayName), ["MA SD", "MA Crash"]);
+        assert.deepEqual(artifacts.repeatedSequences.map((sequence) => sequence.sequenceNumber), [9002, 9003]);
+        assert.equal(bumpArtifacts.bumpSequences[0]?.displayName, "MA BUMP - HIT");
     });
 
     it("keeps command time values in CSV seconds", () => {

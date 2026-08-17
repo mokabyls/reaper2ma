@@ -79,11 +79,56 @@ describe("guided wizard branches", () => {
         const user = userEvent.setup();
         render(<WizardHarness initial={projectAt("output", { exportMode: "cues-and-timecode" })} />);
         expect(screen.getByText("Timecode object number")).toBeInTheDocument();
+        expect(screen.getByText("Incoming timecode offset")).toBeInTheDocument();
         expect(screen.getByText("Incoming timecode slot (TCSlot)")).toBeInTheDocument();
 
         await user.click(screen.getByRole("button", { name: /Cues only/i }));
         expect(screen.queryByText("Timecode object number")).not.toBeInTheDocument();
+        expect(screen.queryByText("Incoming timecode offset")).not.toBeInTheDocument();
         expect(screen.getByText("Incoming timecode slot (TCSlot)")).toBeInTheDocument();
+    });
+
+    it("autosaves a valid offset and blocks an incomplete value", async () => {
+        const user = userEvent.setup();
+        render(<WizardHarness initial={projectAt("output", { exportMode: "cues-and-timecode" })} />);
+        const input = screen.getByLabelText("Incoming timecode offset");
+        const continueButton = screen.getByRole("button", { name: /Continue/ });
+
+        await user.clear(input);
+        await user.type(input, "+01:00:00.000");
+        expect(continueButton).toBeEnabled();
+        expect(screen.getByText(/will trigger when incoming LTC reaches/)).toHaveTextContent("01:01:00.000");
+        await user.click(continueButton);
+        await user.click(screen.getByRole("button", { name: "Back" }));
+        expect(screen.getByLabelText("Incoming timecode offset")).toHaveValue("+01:00:00.000");
+
+        await user.clear(screen.getByLabelText("Incoming timecode offset"));
+        await user.type(screen.getByLabelText("Incoming timecode offset"), "01:60");
+        expect(screen.getByRole("alert")).toHaveTextContent("HH:MM:SS");
+        expect(screen.getByRole("button", { name: /Continue/ })).toBeDisabled();
+    });
+
+    it("warns without blocking when a negative offset places events before zero", async () => {
+        const user = userEvent.setup();
+        render(<WizardHarness initial={projectAt("output", { exportMode: "cues-and-timecode" })} />);
+        const input = screen.getByLabelText("Incoming timecode offset");
+        await user.clear(input);
+        await user.type(input, "-00:00:00.500");
+
+        expect(screen.getByText(/places at least one event before zero/i)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Continue/ })).toBeEnabled();
+    });
+
+    it("translates the offset field, validation and explanation into French", async () => {
+        localStorage.setItem("reaper2ma:ui:v1", JSON.stringify({ locale: "fr", theme: "system" }));
+        const user = userEvent.setup();
+        render(<WizardHarness initial={projectAt("output", { exportMode: "cues-and-timecode", timecodeOffsetMs: 3_600_000 })} />);
+
+        const input = screen.getByLabelText("Offset du timecode entrant");
+        expect(screen.getByText(/sera déclenché lorsque le LTC entrant atteindra/)).toHaveTextContent("01:01:00.000");
+        await user.clear(input);
+        await user.type(input, "incorrect");
+        expect(screen.getByRole("alert")).toHaveTextContent("Saisissez HH:MM:SS");
     });
 
     it("reveals executor addresses and extra macro settings only when selected", async () => {
@@ -126,8 +171,25 @@ describe("guided wizard branches", () => {
         expect(onConfigured).toHaveBeenCalledOnce();
     });
 
-    it("shows real sequence-name examples from the CSV", () => {
+    it("uses a simple name by default and reveals an optional repeat/bump identifier", async () => {
+        const user = userEvent.setup();
         render(<WizardHarness initial={projectAt("sequences")} />);
+        const toggle = screen.getByRole("checkbox", { name: "Add an identifier to repeats and bumps" });
+
+        expect(toggle).not.toBeChecked();
+        expect(screen.getAllByText("MA Drop").length).toBeGreaterThan(0);
+        expect(screen.queryByLabelText("Custom identifier")).not.toBeInTheDocument();
+
+        await user.click(toggle);
+        expect(screen.getByLabelText("Custom identifier")).toHaveValue("FX");
+        expect(screen.getAllByText("MA FX - Drop").length).toBeGreaterThan(0);
+    });
+
+    it("preserves the historical literal identifier on existing projects", () => {
+        render(<WizardHarness initial={projectAt("sequences", { prefix: "1" })} />);
+
+        expect(screen.getByRole("checkbox", { name: "Add an identifier to repeats and bumps" })).toBeChecked();
+        expect(screen.getByLabelText("Custom identifier")).toHaveValue("1");
         expect(screen.getAllByText("MA 1 - Drop").length).toBeGreaterThan(0);
     });
 
@@ -163,7 +225,9 @@ describe("guided wizard branches", () => {
     it("shows every effective timecode, executor and extra setting in the final summary", () => {
         render(<WizardHarness initial={projectAt("review", {
             importMode: "regions-and-markers",
+            prefix: "FX",
             externalTimecodeSlot: 7,
+            timecodeOffsetMs: 3_600_000,
             assignExecutors: true,
             executorLayout: "region-per-page",
             pageNumber: 4,
@@ -178,6 +242,8 @@ describe("guided wizard branches", () => {
         })} csvText={regionCsv} />);
 
         expect(screen.getByText("Incoming timecode slot (TCSlot)").parentElement).toHaveTextContent("TCSlot 7");
+        expect(screen.getByText("Add an identifier to repeats and bumps").parentElement).toHaveTextContent("Yes · FX");
+        expect(screen.getByText("Incoming timecode offset").parentElement).toHaveTextContent("+01:00:00.000");
         expect(screen.getByText("Use executors").parentElement).toHaveTextContent("Yes");
         expect(screen.getByText("Page layout").parentElement).toHaveTextContent("One region per page");
         expect(screen.getByText("Starting page").parentElement).toHaveTextContent("Page 4");

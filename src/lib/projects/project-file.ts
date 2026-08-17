@@ -1,4 +1,5 @@
 import type { ProjectDocumentV1, ProjectExportV1, ProjectSettingsV1, ProjectSnapshotV1, ProjectStage } from "./types.js";
+import { isValidTimecodeOffsetMs } from "../reaper2ma/timecode-offset.js";
 
 const PROJECT_STAGES = new Set<ProjectStage>(["identity", "source", "analysis", "cues", "sequences", "output", "executors", "extras", "review"]);
 
@@ -39,7 +40,8 @@ function isProjectSettings(value: unknown): value is ProjectSettingsV1 {
     const numberKeys = ["sequenceNumber", "appearanceStartNumber", "timecodeNumber", "pageNumber", "pageSlotStart", "bumpPageSlotStart", "cueStartNumber", "regionEndPreRollMs", "regionLayerPreRollMs", "externalTimecodeSlot", "transportOscSlotId"];
     const booleanKeys = ["assignExecutors", "autoOffRegionLayers", "regionLayerPreRollEnabled", "exportShowTimeMacros", "exportTimecodeControlMacros", "includeReaperTransportMacros"];
     const stringKeys = ["sequenceNamePrefix", "speedMaster", "prefix", "transportOscDataName", "transportMacroNamePrefix", "transportOutputFileName"];
-    return numberKeys.every((key) => isNonNegativeNumber(value[key])) && booleanKeys.every((key) => typeof value[key] === "boolean") && stringKeys.every((key) => typeof value[key] === "string") && (value.importMode === "markers-only" || value.importMode === "regions-and-markers") && (value.exportMode === "cues-only" || value.exportMode === "cues-and-timecode") && (value.grandmaVersion === "pre-2.4" || value.grandmaVersion === "2.4+") && (value.executorLayout === undefined || value.executorLayout === "continuous" || value.executorLayout === "region-per-page");
+    const offsetIsValid = value.timecodeOffsetMs === undefined || isValidTimecodeOffsetMs(value.timecodeOffsetMs);
+    return numberKeys.every((key) => isNonNegativeNumber(value[key])) && offsetIsValid && booleanKeys.every((key) => typeof value[key] === "boolean") && stringKeys.every((key) => typeof value[key] === "string") && (value.importMode === "markers-only" || value.importMode === "regions-and-markers") && (value.exportMode === "cues-only" || value.exportMode === "cues-and-timecode") && (value.grandmaVersion === "pre-2.4" || value.grandmaVersion === "2.4+") && (value.executorLayout === undefined || value.executorLayout === "continuous" || value.executorLayout === "region-per-page");
 }
 
 function isAnalysisSummary(value: unknown): boolean {

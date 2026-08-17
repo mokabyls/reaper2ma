@@ -158,6 +158,7 @@ const contentByLocale: Record<Locale, HelpContent> = {
                         syntax: "Color renseignée",
                         title: "Répétition / effet",
                         description: "En mode classique, les marqueurs de couleur identique partagent une séquence d’effet. La première occurrence donne son nom.",
+                        result: "Nom par défaut : MA Drop. Avec l’identifiant optionnel FX : MA FX - Drop.",
                     },
                     {
                         syntax: "Région REAPER",
@@ -314,6 +315,30 @@ const contentByLocale: Record<Locale, HelpContent> = {
                     },
                 ],
             },
+            {
+                id: "timecode-offset",
+                eyebrow: "06 · Timecode",
+                title: "Synchroniser un projet avec le LTC entrant",
+                introduction: "L’offset est appliqué nativement à l’objet Timecode grandMA3. Il change le moment LTC auquel le show répond, sans réécrire les positions REAPER.",
+                items: [
+                    {
+                        syntax: "+01:00:00.000",
+                        title: "Faire démarrer le LTC à une heure",
+                        description: "Un événement conservé à 00:01:00 dans le projet se déclenche lorsque le LTC entrant atteint 01:01:00. Les événements, pré-rolls et durées restent sur leur temps relatif.",
+                    },
+                    {
+                        syntax: "-00:00:00.500",
+                        title: "Avancer le déclenchement",
+                        description: "Un offset négatif déclenche le show plus tôt par rapport au LTC. Si le résultat place un événement avant zéro, Reaper2MA l’indique sans bloquer l’export.",
+                    },
+                    {
+                        syntax: "Offset · TCSlot · objet Timecode",
+                        title: "Trois réglages indépendants",
+                        description: "L’offset décale l’objet ; le TCSlot choisit la source LTC ; le numéro Timecode choisit l’emplacement de l’objet dans le DataPool. Les macros INT/LTC changent seulement le TCSlot et conservent l’offset.",
+                        result: "À zéro, ou en mode Cues uniquement, aucune commande Offset supplémentaire n’est générée.",
+                    },
+                ],
+            },
         ],
         limitsTitle: "Ce que le CSV doit contenir",
         limits: [
@@ -417,7 +442,7 @@ const contentByLocale: Record<Locale, HelpContent> = {
                 introduction: "Before tags are considered, marker color and position already define its destination.",
                 items: [
                     { syntax: "No color", title: "Main cue", description: "In classic mode, the marker joins the main sequence. In region mode, it joins the sequence of its containing region." },
-                    { syntax: "Color set", title: "Repeat / effect", description: "In classic mode, markers with the exact same color share an effect sequence. The first occurrence provides its name." },
+                    { syntax: "Color set", title: "Repeat / effect", description: "In classic mode, markers with the exact same color share an effect sequence. The first occurrence provides its name.", result: "Default name: MA Drop. With the optional FX identifier: MA FX - Drop." },
                     { syntax: "REAPER region", title: "One sequence per region", description: "When region mode is enabled, every real region creates a sequence with automatic Region Start and Region End cues." },
                     { syntax: "[GLOBAL] or [MAIN]", title: "Force the main sequence", description: "Keeps a marker in the main sequence even when it falls inside a region.", result: "Example: [GLOBAL] House Lights" },
                     { syntax: "[R2]", title: "Target a region", description: "Sends the marker to region R2 regardless of its actual position in the CSV.", result: "Example: [R2] Intro Look" },
@@ -473,6 +498,17 @@ const contentByLocale: Record<Locale, HelpContent> = {
                     { syntax: "Region end · 750 ms", title: "Anticipate Region End", description: "Creates the Region End cue before the physical end. A region ending at 30.000 s triggers it at 29.250 s with 750 ms, preparing the transition.", result: "If a marker already falls in that window, the boundary may merge into it to avoid two nearly simultaneous triggers." },
                     { syntax: "Layer Pre-Roll · 750 ms", title: "Prepare a layer", description: "Adds a first Layer Pre-Roll cue before the layer begins. For a 12.000 s start, 750 ms places it at 11.250 s, never below 0." },
                     { syntax: "Layer Auto Off", title: "Keep a layer from remaining active", description: "Adds a fallback Off when no manual OFF_LAYER was found. With a following region it occurs one second after that region starts; otherwise at the parent region's end." },
+                ],
+            },
+            {
+                id: "timecode-offset",
+                eyebrow: "06 · Timecode",
+                title: "Synchronize a project with incoming LTC",
+                introduction: "The offset is applied natively to the grandMA3 Timecode object. It changes the incoming LTC time the show responds to without rewriting REAPER positions.",
+                items: [
+                    { syntax: "+01:00:00.000", title: "Start LTC at one hour", description: "An event kept at 00:01:00 in the project triggers when incoming LTC reaches 01:01:00. Events, pre-rolls, and durations remain at their relative times." },
+                    { syntax: "-00:00:00.500", title: "Trigger earlier", description: "A negative offset triggers the show earlier relative to LTC. If it places an event before zero, Reaper2MA warns without blocking export." },
+                    { syntax: "Offset · TCSlot · Timecode object", title: "Three independent settings", description: "Offset shifts the object; TCSlot selects the LTC source; the Timecode number selects the object's DataPool location. INT/LTC macros only change TCSlot and retain the offset.", result: "At zero, or in Cues only mode, no extra Offset command is generated." },
                 ],
             },
         ],

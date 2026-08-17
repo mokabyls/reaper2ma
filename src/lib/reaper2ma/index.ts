@@ -13,6 +13,7 @@ export * from "./settings.js";
 export * from "./timeline-preview.js";
 export * from "./transport-macros.js";
 export * from "./timecode-duration.js";
+export * from "./timecode-offset.js";
 export * from "./types.js";
 export * from "./xml.js";
 export * from "./zip.js";

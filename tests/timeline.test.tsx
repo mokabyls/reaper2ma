@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineModal } from "../src/components/TimelineModal.js";
 import { I18nProvider } from "../src/i18n.js";
@@ -64,13 +64,21 @@ describe("timeline interactions", () => {
             ],
         };
 
-        render(<I18nProvider><TimelineModal analysis={regionalAnalysis} output={output} regionId="R1" onClose={() => undefined} /></I18nProvider>);
+        render(<I18nProvider><TimelineModal analysis={regionalAnalysis} output={output} regionId="R1" timecodeOffsetMs={3_600_000} onClose={() => undefined} /></I18nProvider>);
+        expect(screen.getByText(/Timecode offset/)).toHaveTextContent("+01:00:00.000");
         expect(screen.getAllByText(/Intro/).length).toBeGreaterThan(0);
         expect(screen.queryByText(/Finale/)).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole("tab", { name: /grandMA3/i }));
         expect(screen.getByText("MA R1 - Intro")).toBeInTheDocument();
         expect(screen.getByText("MA Main")).toBeInTheDocument();
         expect(screen.queryByText("MA R2 - Finale")).not.toBeInTheDocument();
+        const canvas = screen.getByRole("img");
+        expect(canvas).toHaveAccessibleName(/Timecode offset.*\+01:00:00\.000/);
+        const hoverEvent = createEvent.pointerMove(canvas, { pointerId: 99, clientX: 300, clientY: 60 });
+        Object.defineProperties(hoverEvent, { offsetX: { value: 300 }, offsetY: { value: 60 } });
+        fireEvent(canvas, hoverEvent);
+        expect(screen.getByText(/Relative time/)).toHaveTextContent("00:00:12.000");
+        expect(screen.getByText(/Effective incoming LTC/)).toHaveTextContent("01:00:12.000");
     });
 
     it("centers and announces a marker opened from the region browser", () => {

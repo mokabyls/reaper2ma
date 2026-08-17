@@ -39,11 +39,13 @@ Les anciens réglages `reaper2ma:settings:v1` restent lus comme valeurs initiale
 - Le mode régions crée les séquences de régions, layers, pré-rolls et événements Off configurés.
 - Les tags existants (`BPM`, `CueFade`, timing de cue, parties, actions régions/layers) restent pris en charge.
 - Chaque séquence reçoit le Speed Master choisi.
+- L’identifiant secondaire des répétitions et bumps est optionnel et désactivé par défaut. Il peut être activé pour obtenir par exemple `MA FX - Drop` au lieu du nom simple `MA Drop` ; il n’affecte ni le timing ni la numérotation. Les anciens projets conservent leur valeur, notamment l’ancien `1`.
 - Le nom du projet définit le slug des fichiers (`Traversée V2` → `traversee-v2_macro.xml`).
 - Le nom du timecode, modifiable indépendamment, définit les noms et références grandMA3.
+- L’offset signé du Timecode (`HH:MM:SS.mmm`) synchronise un projet REAPER restant à zéro avec un LTC entrant démarrant par exemple à `01:00:00`. Il est appliqué nativement à l’objet grandMA3 sans déplacer les événements, pré-rolls ni durées.
 - Pour les macros additionnelles, le slot INT vaut `-2` avant grandMA3 2.4 et `-1` à partir de 2.4. Les modes LTC et la restauration automatique utilisent le slot externe choisi.
 
-Le `Timecode Number`, le `TCSlot` source (choisi dans l’étape Sortie) et l’`OSC Slot ID` REAPER restent trois réglages distincts.
+Le `Timecode Number`, l’`Offset`, le `TCSlot` source (choisi dans l’étape Sortie) et l’`OSC Slot ID` REAPER restent des réglages distincts. Un événement relatif à `00:01:00` avec un offset `+01:00:00.000` répond ainsi au LTC entrant `01:01:00`. L’offset accepte les valeurs de `-255:59:58.960` à `+255:59:58.960` ; à zéro ou en mode `Cues uniquement`, aucune commande supplémentaire n’est générée. Voir la [documentation Timecode grandMA3](https://help2.malighting.com/grandMA3/2.4/HTML/timecode_settings.html) et la [syntaxe du mot-clé Timecode](https://help2.malighting.com/grandMA3/2.4/HTML/keyword_timecode.html).
 
 ## Développement
 

@@ -1,6 +1,7 @@
 import { createUniqueCuePlan } from "./cue-plan.js";
 import { createExecutorAssignmentPlan, type ExecutorAssignment, type ExecutorSlotGroup } from "./executor-plan.js";
 import { calculateTimecodeDuration, collectTimecodeTimestamps } from "./timecode-duration.js";
+import { formatTimecodeOffsetSeconds, resolveTimecodeOffsetMs } from "./timecode-offset.js";
 import { XML_HEADER, xmlBuilder } from "./xml-common.js";
 import { applySequenceNamePrefix } from "./sequence-services.js";
 import type {
@@ -936,6 +937,11 @@ export function generateMacroXML(
                     ...(settings.exportMode === "cues-and-timecode" && sequences.length > 0
                         ? [
                               createCommand(`Move DataPool ${quoteCommandValue(tempDataPoolName)} Timecode 1 Thru At Timecode ${settings.timecodeNumber}`),
+                              ...(resolveTimecodeOffsetMs(settings.timecodeOffsetMs) !== 0
+                                  ? [createCommand(
+                                        `Set Timecode ${settings.timecodeNumber} Property ${quoteCommandValue("Offset")} ${quoteCommandValue(formatTimecodeOffsetSeconds(settings.timecodeOffsetMs))}`,
+                                    )]
+                                  : []),
                               createCommand(
                                   `Set Timecode ${settings.timecodeNumber} Property ${quoteCommandValue("PlaybackAndRecord")} ${quoteCommandValue("Manual Events")}`,
                               ),

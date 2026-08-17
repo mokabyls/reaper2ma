@@ -78,8 +78,8 @@ The wizard stages are:
 1. CSV source.
 2. Progressive validation and analysis.
 3. Cue and region-layer behavior.
-4. Sequence IDs, prefixes, Appearance ID and Speed Master.
-5. Cues-only or cues-and-timecode output, with separate Timecode object number and incoming `TCSlot`.
+4. Sequence IDs, the global name prefix, an optional repeat/bump identifier, Appearance ID and Speed Master.
+5. Cues-only or cues-and-timecode output, with separate Timecode object number, signed native offset and incoming `TCSlot`.
 6. Optional executor assignments with a complete sequence-to-executor preview and either continuous placement or one REAPER region per grandMA3 page.
 7. Show Time, Timecode Control and REAPER OSC extras.
 8. Final diagnostics, exact generated-sequence count, duration in seconds and `H:i:s`, editable timecode name, file list, timeline, ZIP download and a complete effective-settings summary. The summary explicitly distinguishes the Timecode object number, incoming `TCSlot`, derived internal slot, executor activation/layout/addresses and every optional macro setting.
@@ -172,7 +172,11 @@ Preserve these rules unless a requested change explicitly changes conversion sem
 - `Temp` and `Flash` create bump overlays grouped by color, cue and region context.
 - Main cue numbering starts at `cueStartNumber`.
 - Every generated sequence receives the configured Speed Master.
+- `prefix` remains the schema-compatible secondary identifier for colored repeat and bump names. New projects store an empty string and show simple names such as `MA Drop`; enabling the option reveals a custom identifier such as `FX` and produces `MA FX - Drop`. Existing projects retain literal values such as the historical `1`, so their XML is unchanged.
 - Macro XML is always generated; command-driven timecode is added only in `cues-and-timecode` mode.
+- `timecodeOffsetMs` is an optional signed millisecond value with an effective default of zero and a range of ±`255:59:58.960`. New projects persist zero; schema-v1 projects and revisions without the field remain valid.
+- A non-zero offset is emitted immediately after the Timecode object move as `Set Timecode {number} Property "Offset" "{decimal seconds}"`. Zero and cues-only exports omit this line, preserving historical XML byte-for-byte.
+- The offset changes only the grandMA3 Timecode object's relationship to incoming LTC. Source timestamps, calculated events, duration, pre-rolls, releases, OffCue behavior and TCSlot-switching macros remain unchanged.
 - The converter uses source seconds directly.
 - Existing execution, BPM, CueFade, timing, Cue Part, region action and layer action tags remain supported.
 - Region sequences include start/end boundaries and configured end pre-roll behavior.
@@ -191,13 +195,17 @@ Project extras preserve all existing REAPER options:
 - Macro Name Prefix.
 - Output File Name.
 
-Timecode source settings are separate from both the Timecode object number and REAPER OSC slot:
+Timecode source settings are separate from the Timecode object number, its native offset and the REAPER OSC slot:
 
 - `grandmaVersion: "pre-2.4" | "2.4+"`.
 - `externalTimecodeSlot`, positive integer, default 1.
 - Derived internal slot: `-2` before 2.4, `-1` for 2.4+.
 
 Show Time manual and every INT switching/rewind macro use the derived internal slot. Show Time auto restore and every LTC macro use the selected external slot. New projects default to grandMA3 2.4+; the old helper API keeps its pre-2.4 default so historical output remains stable.
+
+The Output step accepts signed `HH:MM:SS` and `HH:MM:SS.mmm` values. It keeps incomplete text local, blocks navigation on malformed or out-of-range input, autosaves only valid values and warns without blocking when a negative offset places calculated events before zero. The complete settings summary and project overview show the effective offset. Timeline canvases remain on relative coordinates; their header shows the offset and output-event hover details show both relative time and effective incoming LTC.
+
+grandMA3 2.4 documents Offset as a native Timecode property and describes the one-hour project-offset use case: [Timecode settings](https://help2.malighting.com/grandMA3/2.4/HTML/timecode_settings.html), [Timecode keyword](https://help2.malighting.com/grandMA3/2.4/HTML/keyword_timecode.html).
 
 ## Region browser and timeline
 
@@ -233,7 +241,7 @@ Interactive cards are buttons, form fields have labels, diagnostics use status/a
 
 Validated locally on 2026-08-17:
 
-- `pnpm test`: 87 conversion tests plus 29 Vitest project/wizard/timeline/routing tests pass.
+- `pnpm test`: 92 conversion tests plus 33 Vitest project/wizard/timeline/routing tests pass.
 - `pnpm check`: passes.
 - `pnpm build`: passes and creates the static `build/` bundle.
 

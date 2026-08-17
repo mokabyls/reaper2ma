@@ -229,6 +229,7 @@ export type ConversionSettings = {
     appearanceStartNumber: number;
     sequenceNamePrefix: string;
     timecodeNumber: number;
+    timecodeOffsetMs?: number;
     pageNumber: number;
     pageSlotStart: number;
     bumpPageSlotStart: number;

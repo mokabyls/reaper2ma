@@ -22,6 +22,8 @@ describe("IndexedDB project repository", () => {
     it("creates, updates, reads and deletes projects", async () => {
         const repository = new IndexedDbProjectRepository();
         const project = createProjectDocument("Odyssees");
+        expect(project.settings.timecodeOffsetMs).toBe(0);
+        expect(project.settings.prefix).toBe("");
         await repository.saveProject(project);
 
         expect(await repository.getProject(project.id)).toEqual(project);
@@ -72,7 +74,8 @@ describe("IndexedDB project repository", () => {
 
     it("exports validated history and supports replace or copy on identifier collision", async () => {
         const repository = new IndexedDbProjectRepository();
-        const project = createProjectDocument("Export me");
+        const createdProject = createProjectDocument("Export me");
+        const project = { ...createdProject, settings: { ...createdProject.settings, timecodeOffsetMs: -500, prefix: "1" } };
         await repository.saveProject(project);
         const attached = await repository.attachSource(project, "show.csv", "#,Name,Start,Color\n1,Intro,0,");
         await repository.createCheckpoint(attached.project, "stage");
@@ -80,6 +83,8 @@ describe("IndexedDB project repository", () => {
         const serialized = serializeProjectExport(await repository.exportProject(project.id));
         const parsed = parseProjectExport(serialized);
         expect(parsed.project.id).toBe(project.id);
+        expect(parsed.project.settings.timecodeOffsetMs).toBe(-500);
+        expect(parsed.project.settings.prefix).toBe("1");
         expect(parsed.sources).toHaveLength(1);
         expect(parsed.revisions).toHaveLength(1);
 
@@ -92,10 +97,26 @@ describe("IndexedDB project repository", () => {
         expect(replacement.id).toBe(project.id);
         expect((await repository.getProject(project.id))?.projectName).toBe("Export me");
 
-        const legacyBundle = JSON.parse(serialized) as { project: { settings: { executorLayout?: string } }; revisions: Array<{ snapshot: { settings: { executorLayout?: string } } }> };
+        const legacyBundle = JSON.parse(serialized) as { project: { settings: { executorLayout?: string; timecodeOffsetMs?: number } }; revisions: Array<{ snapshot: { settings: { executorLayout?: string; timecodeOffsetMs?: number } } }> };
         delete legacyBundle.project.settings.executorLayout;
-        for (const revision of legacyBundle.revisions) delete revision.snapshot.settings.executorLayout;
-        expect(parseProjectExport(JSON.stringify(legacyBundle)).project.settings.executorLayout).toBeUndefined();
+        delete legacyBundle.project.settings.timecodeOffsetMs;
+        for (const revision of legacyBundle.revisions) {
+            delete revision.snapshot.settings.executorLayout;
+            delete revision.snapshot.settings.timecodeOffsetMs;
+        }
+        const parsedLegacy = parseProjectExport(JSON.stringify(legacyBundle));
+        expect(parsedLegacy.project.settings.executorLayout).toBeUndefined();
+        expect(parsedLegacy.project.settings.timecodeOffsetMs).toBeUndefined();
+
+        const legacyCopy = await repository.importProject(parsedLegacy, "copy");
+        const legacyRevision = (await repository.listRevisions(legacyCopy.id))[0];
+        expect(legacyRevision).toBeDefined();
+        const restoredLegacy = await repository.restoreRevision(legacyCopy.id, legacyRevision!.id);
+        expect(restoredLegacy.settings.timecodeOffsetMs).toBeUndefined();
+
+        const invalidOffsetBundle = structuredClone(parsed);
+        invalidOffsetBundle.project.settings.timecodeOffsetMs = 921_598_961;
+        expect(() => parseProjectExport(JSON.stringify(invalidOffsetBundle))).toThrow(/not a supported/i);
     });
 
     it("rejects malformed project exports", () => {

@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { analyzeReaperCsvProgressively, resolveInternalTimecodeSlot, type ReaperAnalysisPhase, type ReaperCsvAnalysis, type TimelinePreview } from "../lib/reaper2ma/index.js";
+import { analyzeReaperCsvProgressively, formatEffectiveTimecode, formatTimecodeOffset, parseTimecodeOffset, resolveInternalTimecodeSlot, type ReaperAnalysisPhase, type ReaperCsvAnalysis, type TimelinePreview } from "../lib/reaper2ma/index.js";
 import { createProjectRuntime } from "../lib/projects/runtime.js";
 import type { ProjectDocumentV1, ProjectSourceV1, ProjectStage } from "../lib/projects/index.js";
 import { useI18n } from "../i18n.js";
@@ -39,6 +39,9 @@ export function ProjectWizard({
     const [timelineMarkerId, setTimelineMarkerId] = useState<string>();
     const [stageMotion, setStageMotion] = useState<"in" | "idle" | "out">("in");
     const [reviewTimecodeName, setReviewTimecodeName] = useState(project.timecodeName);
+    const [timecodeOffsetValid, setTimecodeOffsetValid] = useState(true);
+    const [repeatPrefixEnabled, setRepeatPrefixEnabled] = useState(() => Boolean(project.settings.prefix.trim()));
+    const [repeatPrefixDraft, setRepeatPrefixDraft] = useState(() => project.settings.prefix.trim() || "FX");
     const transitionFrameRef = useRef<number | undefined>(undefined);
     const [error, setError] = useState("");
     const runtime = useMemo(() => {
@@ -58,10 +61,18 @@ export function ProjectWizard({
         ? runtime.preview.generatedSequenceNames.length + (runtime.artifacts.uniqueCues.length > 0 ? 1 : 0)
         : 0;
     const totalDurationSeconds = runtime ? Number.parseFloat(runtime.preview.duration) || 0 : 0;
+    const earliestOutputEventSeconds = useMemo(() => {
+        const timestamps = runtime?.timeline.tracks.flatMap((track) => track.events.map((event) => Number.parseFloat(event.timestamp))).filter(Number.isFinite) ?? [];
+        return timestamps.length ? Math.min(...timestamps) : undefined;
+    }, [runtime]);
 
     useEffect(() => { dispatch({ type: "go", stage: project.currentStage }); }, [project.currentStage]);
     useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [wizard.stage]);
     useEffect(() => { setReviewTimecodeName(project.timecodeName); }, [project.timecodeName]);
+    useEffect(() => {
+        setRepeatPrefixEnabled(Boolean(project.settings.prefix.trim()));
+        setRepeatPrefixDraft(project.settings.prefix.trim() || "FX");
+    }, [project.id]);
     useEffect(() => {
         if (!timelineRegionId && analysis?.regions[0]) setTimelineRegionId(analysis.regions[0].id);
     }, [analysis, timelineRegionId]);
@@ -202,7 +213,36 @@ export function ProjectWizard({
                         <div className="field-grid">
                             <NumberField label={t("sequences.number")} help={t("sequences.numberHelp")} value={project.settings.sequenceNumber} min={1} max={9999} onChange={(value) => updateSettings({ sequenceNumber: value })} />
                             <TextField label={t("sequences.namePrefix")} help={t("sequences.namePrefixHelp")} value={project.settings.sequenceNamePrefix} onChange={(value) => updateSettings({ sequenceNamePrefix: value })} examples={sequenceExamples} />
-                            <TextField label={t("sequences.repeatPrefix")} help={t("sequences.repeatPrefixHelp")} value={project.settings.prefix} onChange={(value) => updateSettings({ prefix: value })} examples={repeatExamples} />
+                            <div className="optional-prefix-setting">
+                                <Toggle
+                                    label={t("sequences.repeatPrefixToggle")}
+                                    help={t("sequences.repeatPrefixToggleHelp")}
+                                    checked={repeatPrefixEnabled}
+                                    onChange={async (enabled) => {
+                                        setRepeatPrefixEnabled(enabled);
+                                        const nextPrefix = enabled ? repeatPrefixDraft.trim() || "FX" : "";
+                                        if (enabled) setRepeatPrefixDraft(nextPrefix);
+                                        await updateSettings({ prefix: nextPrefix });
+                                    }}
+                                />
+                                {repeatPrefixEnabled ? (
+                                    <div className="reveal-panel optional-prefix-field">
+                                        <TextField
+                                            label={t("sequences.repeatPrefix")}
+                                            help={t("sequences.repeatPrefixHelp")}
+                                            value={repeatPrefixDraft}
+                                            onChange={(value) => {
+                                                setRepeatPrefixDraft(value);
+                                                return updateSettings({ prefix: value });
+                                            }}
+                                            onBlur={() => {
+                                                if (!repeatPrefixDraft.trim()) setRepeatPrefixEnabled(false);
+                                            }}
+                                            examples={repeatExamples}
+                                        />
+                                    </div>
+                                ) : <GeneratedExamples examples={repeatExamples} standalone />}
+                            </div>
                             <NumberField label={t("sequences.appearance")} help={t("sequences.appearanceHelp")} value={project.settings.appearanceStartNumber} min={1} max={9999} onChange={(value) => updateSettings({ appearanceStartNumber: value })} />
                             <NumberField label={t("sequences.speed")} help={t("sequences.speedHelp")} value={Number(project.settings.speedMaster.split(".")[1] ?? 4)} min={1} max={15} prefix="3." onChange={(value) => updateSettings({ speedMaster: `3.${value}` })} />
                         </div>
@@ -219,11 +259,19 @@ export function ProjectWizard({
                         </div>
                         <div className="field-grid output-fields reveal-panel">
                             {project.settings.exportMode === "cues-and-timecode" ? (
-                                <NumberField label={t("output.timecodeNumber")} help={t("output.timecodeNumberHelp")} value={project.settings.timecodeNumber} min={1} max={9999} onChange={(value) => updateSettings({ timecodeNumber: value })} />
+                                <>
+                                    <NumberField label={t("output.timecodeNumber")} help={t("output.timecodeNumberHelp")} value={project.settings.timecodeNumber} min={1} max={9999} onChange={(value) => updateSettings({ timecodeNumber: value })} />
+                                    <TimecodeOffsetField
+                                        value={project.settings.timecodeOffsetMs ?? 0}
+                                        earliestEventSeconds={earliestOutputEventSeconds}
+                                        onChange={(value) => updateSettings({ timecodeOffsetMs: value })}
+                                        onValidityChange={setTimecodeOffsetValid}
+                                    />
+                                </>
                             ) : null}
                             <NumberField label={t("output.incomingSlot")} help={t("output.incomingSlotHelp")} value={project.settings.externalTimecodeSlot} min={1} max={9999} onChange={(value) => updateSettings({ externalTimecodeSlot: value })} />
                         </div>
-                        <WizardActions onBack={back} onNext={() => go("executors")} />
+                        <WizardActions onBack={back} onNext={() => go("executors")} nextDisabled={project.settings.exportMode === "cues-and-timecode" && !timecodeOffsetValid} />
                     </>
                 ) : null}
 
@@ -316,7 +364,7 @@ export function ProjectWizard({
                 ) : null}
                 </div>
             </section>
-            {timelineOpen && analysis ? <TimelineModal analysis={analysis} output={runtime?.timeline as TimelinePreview | undefined} regionId={timelineRegionId} focusMarkerId={timelineMarkerId} onClose={() => setTimelineOpen(false)} /> : null}
+            {timelineOpen && analysis ? <TimelineModal analysis={analysis} output={runtime?.timeline as TimelinePreview | undefined} regionId={timelineRegionId} focusMarkerId={timelineMarkerId} timecodeOffsetMs={project.settings.exportMode === "cues-and-timecode" ? project.settings.timecodeOffsetMs ?? 0 : undefined} onClose={() => setTimelineOpen(false)} /> : null}
         </main>
     );
 }
@@ -373,9 +421,66 @@ function NumberField({ label, help, value, onChange, min, max, step = 1, prefix,
     return <div className="field"><FieldHeading id={id} label={label} help={help} /><div className="affixed-input">{prefix ? <b>{prefix}</b> : null}<input id={id} aria-label={label} type="number" value={value} min={min} max={max} step={step} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next) && (min === undefined || next >= min) && (max === undefined || next <= max)) void onChange(next); }} />{suffix ? <b>{suffix}</b> : null}</div></div>;
 }
 function TextField({ label, help, value, onChange, examples, onBlur, onKeyDown }: { label: string; help?: string; value: string; onChange: (value: string) => void | Promise<void>; examples?: string[]; onBlur?: () => void; onKeyDown?: (event: ReactKeyboardEvent<HTMLInputElement>) => void }) {
+    const id = useId();
+    return <div className="field"><FieldHeading id={id} label={label} help={help} /><input id={id} aria-label={label} type="text" value={value} onChange={(event) => void onChange(event.target.value)} onBlur={onBlur} onKeyDown={onKeyDown} />{examples?.length ? <GeneratedExamples examples={examples} /> : null}</div>;
+}
+function GeneratedExamples({ examples, standalone = false }: { examples: string[]; standalone?: boolean }) {
+    const { t } = useI18n();
+    return examples.length ? <span className={`generated-examples${standalone ? " standalone" : ""}`}><small>{t("field.preview")}</small>{examples.map((example) => <code key={example}>{example}</code>)}</span> : null;
+}
+function TimecodeOffsetField({ value, earliestEventSeconds, onChange, onValidityChange }: { value: number; earliestEventSeconds?: number; onChange: (value: number) => void | Promise<void>; onValidityChange: (valid: boolean) => void }) {
     const { t } = useI18n();
     const id = useId();
-    return <div className="field"><FieldHeading id={id} label={label} help={help} /><input id={id} aria-label={label} type="text" value={value} onChange={(event) => void onChange(event.target.value)} onBlur={onBlur} onKeyDown={onKeyDown} />{examples?.length ? <span className="generated-examples"><small>{t("field.preview")}</small>{examples.map((example) => <code key={example}>{example}</code>)}</span> : null}</div>;
+    const errorId = `${id}-error`;
+    const exampleId = `${id}-example`;
+    const focusedRef = useRef(false);
+    const [draft, setDraft] = useState(() => formatTimecodeOffset(value));
+    const parsed = parseTimecodeOffset(draft);
+    const valid = parsed !== undefined;
+    const displayedOffset = parsed ?? value;
+    const exampleRelativeMs = 60_000;
+    const hasEventsBeforeZero = earliestEventSeconds !== undefined && earliestEventSeconds * 1000 + displayedOffset < 0;
+
+    useEffect(() => {
+        if (!focusedRef.current) setDraft(formatTimecodeOffset(value));
+    }, [value]);
+    useEffect(() => onValidityChange(valid), [onValidityChange, valid]);
+
+    return (
+        <div className="field timecode-offset-field">
+            <FieldHeading id={id} label={t("output.timecodeOffset")} help={t("output.timecodeOffsetHelp")} />
+            <input
+                id={id}
+                aria-label={t("output.timecodeOffset")}
+                aria-describedby={valid ? exampleId : errorId}
+                aria-invalid={!valid}
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={17}
+                value={draft}
+                onFocus={() => { focusedRef.current = true; }}
+                onChange={(event) => {
+                    const nextDraft = event.target.value;
+                    const nextValue = parseTimecodeOffset(nextDraft);
+                    setDraft(nextDraft);
+                    if (nextValue !== undefined) void onChange(nextValue);
+                }}
+                onBlur={() => {
+                    focusedRef.current = false;
+                    const nextValue = parseTimecodeOffset(draft);
+                    if (nextValue !== undefined) setDraft(formatTimecodeOffset(nextValue));
+                }}
+                placeholder="+01:00:00.000"
+            />
+            {valid ? <p className="timecode-offset-example" id={exampleId}>
+                {t("output.timecodeOffsetExampleStart")} <code>{formatEffectiveTimecode(exampleRelativeMs)}</code> {t("output.timecodeOffsetExampleMiddle")} <code>{formatEffectiveTimecode(exampleRelativeMs + displayedOffset)}</code>.
+            </p> : null}
+            {!valid ? <small className="field-error" id={errorId} role="alert">{t("output.timecodeOffsetInvalid")}</small> : null}
+            {valid && hasEventsBeforeZero ? <small className="field-warning" role="status">{t("output.timecodeOffsetNegativeWarning")}</small> : null}
+        </div>
+    );
 }
 function SelectField({ label, help, value, onChange, options }: { label: string; help?: string; value: string; onChange: (value: string) => void | Promise<void>; options: Array<{ value: string; label: string }> }) {
     const id = useId();
@@ -409,7 +514,7 @@ function ExecutorAssignmentPreview({ assignments }: { assignments: NonNullable<R
 
     return <section className="executor-assignment-preview" aria-labelledby="executor-assignment-title"><header><div><h3 id="executor-assignment-title">{t("executors.preview")}</h3><p>{t("executors.previewHelp")}</p></div><span>{assignments.length}</span></header><div className="executor-page-list">{[...pages].map(([pageNumber, pageAssignments]) => <section className="executor-page" key={pageNumber}><header><strong>Page {pageNumber}</strong><span>{pageAssignments.length} {t("executors.sequenceCount")}</span></header><div className="executor-assignment-list" role="list">{pageAssignments.map((assignment) => <div className="executor-assignment-row" role="listitem" key={`${assignment.pageNumber}-${assignment.slotNumber}-${assignment.sequenceNumber}`}><code>Sequence {assignment.sequenceNumber}</code><span title={assignment.sequenceName}>{assignment.sequenceName}</span><strong>Page {assignment.pageNumber}.{assignment.slotNumber}</strong></div>)}</div></section>)}</div></section>;
 }
-function WizardActions({ onBack, onNext }: { onBack: () => void; onNext: () => void | Promise<void> }) { const { t } = useI18n(); return <div className="wizard-actions"><button className="button secondary" type="button" onClick={onBack}>{t("action.back")}</button><button className="button primary" type="button" onClick={() => void onNext()}>{t("action.continue")} →</button></div>; }
+function WizardActions({ onBack, onNext, nextDisabled = false }: { onBack: () => void; onNext: () => void | Promise<void>; nextDisabled?: boolean }) { const { t } = useI18n(); return <div className="wizard-actions"><button className="button secondary" type="button" onClick={onBack}>{t("action.back")}</button><button className="button primary" type="button" disabled={nextDisabled} onClick={() => void onNext()}>{t("action.continue")} →</button></div>; }
 function formatShortDuration(value: number) { const minutes = Math.floor(value / 60); const seconds = Math.floor(value % 60); return `${minutes}:${String(seconds).padStart(2, "0")}`; }
 function formatSeconds(value: number) { return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, ""); }
 function formatClockDuration(value: number) { const total = Math.max(0, Math.floor(value)); const hours = Math.floor(total / 3600); const minutes = Math.floor((total % 3600) / 60); const seconds = total % 60; return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`; }

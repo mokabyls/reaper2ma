@@ -1,4 +1,4 @@
-import { resolveInternalTimecodeSlot } from "../lib/reaper2ma/index.js";
+import { formatTimecodeOffset, resolveInternalTimecodeSlot } from "../lib/reaper2ma/index.js";
 import type { ProjectDocumentV1, ProjectStage } from "../lib/projects/index.js";
 import { useI18n } from "../i18n.js";
 
@@ -28,6 +28,7 @@ export function ProjectSettingsSummary({ project, executorAssignmentCount, onEdi
     const outputItems: SummaryItem[] = [
         { label: t("summary.exportMode"), value: settings.exportMode === "cues-and-timecode" ? t("output.full") : t("output.cues") },
         { label: t("output.timecodeNumber"), value: settings.exportMode === "cues-and-timecode" ? String(settings.timecodeNumber) : t("summary.notCreated") },
+        { label: t("output.timecodeOffset"), value: settings.exportMode === "cues-and-timecode" ? formatTimecodeOffset(settings.timecodeOffsetMs) : t("summary.notApplied") },
         { label: t("output.incomingSlot"), value: `TCSlot ${settings.externalTimecodeSlot}` },
     ];
 
@@ -70,7 +71,7 @@ export function ProjectSettingsSummary({ project, executorAssignmentCount, onEdi
         { title: t("summary.sequences"), stage: "sequences", items: [
             { label: t("sequences.number"), value: String(settings.sequenceNumber) },
             { label: t("sequences.namePrefix"), value: settings.sequenceNamePrefix || "—" },
-            { label: t("sequences.repeatPrefix"), value: settings.prefix || "—" },
+            { label: t("sequences.repeatPrefixToggle"), value: settings.prefix.trim() ? `${t("summary.yes")} · ${settings.prefix.trim()}` : t("summary.no"), enabled: Boolean(settings.prefix.trim()) },
             { label: t("sequences.appearance"), value: String(settings.appearanceStartNumber) },
             { label: t("sequences.speed"), value: settings.speedMaster },
         ] },

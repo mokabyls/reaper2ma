@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { convertReaperColorToCssColor, type ReaperCsvAnalysis, type TimelinePreview } from "../lib/reaper2ma/index.js";
+import { convertReaperColorToCssColor, formatEffectiveTimecode, formatTimecodeOffset, type ReaperCsvAnalysis, type TimelinePreview } from "../lib/reaper2ma/index.js";
 import { formatDuration } from "../lib/format.js";
 import { useI18n } from "../i18n.js";
 
@@ -18,12 +18,14 @@ export function TimelineModal({
     output,
     regionId,
     focusMarkerId,
+    timecodeOffsetMs,
     onClose,
 }: {
     analysis: ReaperCsvAnalysis;
     output?: TimelinePreview;
     regionId?: string;
     focusMarkerId?: string;
+    timecodeOffsetMs?: number;
     onClose: () => void;
 }) {
     const { t } = useI18n();
@@ -58,6 +60,7 @@ export function TimelineModal({
                     <div>
                         <span className="eyebrow">REAPER / grandMA3</span>
                         <h2 id="timeline-heading">{t("timeline.title")}</h2>
+                        {timecodeOffsetMs !== undefined ? <p className="timeline-offset-label">{t("timeline.timecodeOffset")} · <strong>{formatTimecodeOffset(timecodeOffsetMs)}</strong></p> : null}
                         {scope.label ? <p className="timeline-scope-label">{t("timeline.scope")} · {scope.label}</p> : null}
                         {focus ? <p className="timeline-focus-label"><span aria-hidden="true">⌖</span> {t("timeline.focusedMarker")} · <strong>{focus.label}</strong> · {formatDuration(focus.time)}</p> : null}
                     </div>
@@ -67,13 +70,13 @@ export function TimelineModal({
                     <button type="button" role="tab" aria-selected={view === "source"} className={view === "source" ? "active" : ""} onClick={() => setView("source")}>{t("timeline.source")}</button>
                     <button type="button" role="tab" aria-selected={view === "output"} className={view === "output" ? "active" : ""} onClick={() => setView("output")}>{t("timeline.output")}</button>
                 </div>
-                {scope.lanes.length ? <TimelineCanvas key={`${view}-${regionId ?? "all"}-${focusMarkerId ?? "none"}`} lanes={scope.lanes} rangeStart={scope.rangeStart} rangeEnd={scope.rangeEnd} focus={focus} /> : <div className="empty-state">{t("timeline.empty")}</div>}
+                {scope.lanes.length ? <TimelineCanvas key={`${view}-${regionId ?? "all"}-${focusMarkerId ?? "none"}`} lanes={scope.lanes} rangeStart={scope.rangeStart} rangeEnd={scope.rangeEnd} focus={focus} timecodeOffsetMs={timecodeOffsetMs ?? 0} showEffectiveTime={view === "output"} /> : <div className="empty-state">{t("timeline.empty")}</div>}
             </section>
         </div>
     );
 }
 
-function TimelineCanvas({ lanes, rangeStart, rangeEnd, focus }: { lanes: TimelineLane[]; rangeStart: number; rangeEnd: number; focus?: TimelineFocus }) {
+function TimelineCanvas({ lanes, rangeStart, rangeEnd, focus, timecodeOffsetMs, showEffectiveTime }: { lanes: TimelineLane[]; rangeStart: number; rangeEnd: number; focus?: TimelineFocus; timecodeOffsetMs: number; showEffectiveTime: boolean }) {
     const { t } = useI18n();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
@@ -238,7 +241,7 @@ function TimelineCanvas({ lanes, rangeStart, rangeEnd, focus }: { lanes: Timelin
                     ref={canvasRef}
                     role="img"
                     tabIndex={0}
-                    aria-label={`${t("timeline.title")}, ${lanes.length} tracks, ${formatDuration(rangeEnd - rangeStart)}${focus ? `, ${t("timeline.focusedMarker")}: ${focus.label}, ${formatDuration(focus.time)}` : ""}`}
+                    aria-label={`${t("timeline.title")}, ${lanes.length} tracks, ${formatDuration(rangeEnd - rangeStart)}${showEffectiveTime ? `, ${t("timeline.timecodeOffset")}: ${formatTimecodeOffset(timecodeOffsetMs)}` : ""}${focus ? `, ${t("timeline.focusedMarker")}: ${focus.label}, ${formatDuration(focus.time)}` : ""}`}
                     onPointerDown={handlePointerDown}
                     onPointerMove={handlePointerMove}
                     onPointerUp={endPointer}
@@ -248,7 +251,9 @@ function TimelineCanvas({ lanes, rangeStart, rangeEnd, focus }: { lanes: Timelin
                 {hovered ? (
                     <div className="timeline-tooltip" style={{ left: Math.min(size.width - 230, hovered.x + 12), top: Math.max(8, hovered.y - 34) }}>
                         <strong>{hovered.event.label}</strong>
-                        <span>{hovered.lane.label} · {formatDuration(hovered.event.time)}</span>
+                        <span>{hovered.lane.label}</span>
+                        <small>{t("timeline.relativeTime")} · {formatEffectiveTimecode(hovered.event.time * 1000)}</small>
+                        {showEffectiveTime ? <small>{t("timeline.effectiveLtc")} · {formatEffectiveTimecode(hovered.event.time * 1000 + timecodeOffsetMs)}</small> : null}
                         <small>{hovered.event.meta}</small>
                     </div>
                 ) : null}

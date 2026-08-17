@@ -112,7 +112,7 @@ export function ProjectOverview({
                 <button className="button secondary" type="button" onClick={onExportProject}>{t("action.export")} .reaper2ma.json</button>
                 <button className="button secondary" type="button" onClick={onDuplicate}>{t("action.duplicate")} V2/V3</button>
             </div>
-            {timelineOpen && analysis ? <TimelineModal analysis={analysis} output={runtime?.timeline} regionId={timelineRegionId} focusMarkerId={timelineMarkerId} onClose={() => setTimelineOpen(false)} /> : null}
+            {timelineOpen && analysis ? <TimelineModal analysis={analysis} output={runtime?.timeline} regionId={timelineRegionId} focusMarkerId={timelineMarkerId} timecodeOffsetMs={project.settings.exportMode === "cues-and-timecode" ? project.settings.timecodeOffsetMs ?? 0 : undefined} onClose={() => setTimelineOpen(false)} /> : null}
         </main>
     );
 }

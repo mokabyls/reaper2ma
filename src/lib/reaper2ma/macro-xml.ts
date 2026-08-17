@@ -163,6 +163,26 @@ function createCueTimingCommands(tempDataPoolName: string, sequence: GeneratedSe
     });
 }
 
+function createStandardRecipeCommand(
+    tempDataPoolName: string,
+    sequence: GeneratedSequence,
+    cueNumber: number,
+    partNumber: number,
+): MacroLine {
+    return createCommand(
+        `Store Type "StandardRecipe" DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cueNumber} Part ${partNumber}.1`,
+    );
+}
+
+function createCueAndMainRecipeCommands(tempDataPoolName: string, sequence: GeneratedSequence): MacroLine[] {
+    return sequence.cues.flatMap((cue) => [
+        createCommand(
+            `Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} /Overwrite`,
+        ),
+        createStandardRecipeCommand(tempDataPoolName, sequence, cue.cueNumber, 0),
+    ]);
+}
+
 function createCuePartCommands(tempDataPoolName: string, sequence: GeneratedSequence): MacroLine[] {
     return sequence.cues.flatMap((cue) => {
         const cueParts = cue.cueParts ?? [];
@@ -176,12 +196,7 @@ function createCuePartCommands(tempDataPoolName: string, sequence: GeneratedSequ
                 `Set DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Property "AllowDuplicates" "Yes"`,
             ),
             ...cueParts.flatMap((part) => [
-                createCommand(
-                    `Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber}`,
-                ),
-                createCommand(
-                    `Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber}.1`,
-                ),
+                createStandardRecipeCommand(tempDataPoolName, sequence, cue.cueNumber, part.partNumber),
                 createCommand(
                     `Label DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} Cue ${cue.cueNumber} Part ${part.partNumber} ${quoteCommandValue(part.name)}`,
                 ),
@@ -256,19 +271,14 @@ function formatCueTimingModifiers(cueTiming: CueTimingTag[]): string {
 }
 
 function createSequenceSetupCommands(tempDataPoolName: string, settings: ConversionSettings, sequence: GeneratedSequence): MacroLine[] {
-    const firstCueNumber = sequence.cues[0]?.cueNumber;
-    const lastCueNumber = sequence.cues[sequence.cues.length - 1]?.cueNumber;
-    const cueRange = createCueRange(firstCueNumber, lastCueNumber);
-
-    if (cueRange === undefined) {
+    if (sequence.cues.length === 0) {
         return [];
     }
 
     return [
         createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} ${quoteCommandValue(sequence.displayName)}`),
         createSequenceLabelCommand(tempDataPoolName, sequence),
-        createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} ${cueRange} /Merge`),
-        createCommand(`Store DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} ${cueRange} Part 0.1`),
+        ...createCueAndMainRecipeCommands(tempDataPoolName, sequence),
         ...createCuePartCommands(tempDataPoolName, sequence),
         createSpeedMasterCommand(tempDataPoolName, sequence, settings.speedMaster),
         ...createSequenceAppearanceAssignmentCommands(tempDataPoolName, sequence),
@@ -278,19 +288,8 @@ function createSequenceSetupCommands(tempDataPoolName: string, settings: Convers
         ...createCueTimingCommands(tempDataPoolName, sequence),
         ...createCueCommandCommands(tempDataPoolName, sequence),
         ...createOffCueCommands(tempDataPoolName, sequence),
+        createCommand(`Cook DataPool ${quoteCommandValue(tempDataPoolName)} Sequence ${sequence.localSequenceNumber} /Overwrite`),
     ];
-}
-
-function createCueRange(firstCueNumber: number | undefined, lastCueNumber: number | undefined): string | undefined {
-    if (firstCueNumber === undefined || lastCueNumber === undefined) {
-        return undefined;
-    }
-
-    if (firstCueNumber === lastCueNumber) {
-        return `Cue ${firstCueNumber}`;
-    }
-
-    return `Cue ${firstCueNumber} Thru ${lastCueNumber}`;
 }
 
 function createGeneratedSequences(

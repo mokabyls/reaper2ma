@@ -530,10 +530,20 @@ describe("conversion artifacts", () => {
         assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 1 Cue 3 "Outro"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 2 Cue 1 "Start"'), true);
         assert.equal(commands.includes('Label DataPool "R2MA songcsv" Sequence 3 Cue 1 "Start"'), true);
-        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 Cue 1 Thru 3 /Merge'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 Cue 1 /Overwrite'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 Cue 2 /Overwrite'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA songcsv" Sequence 1 Cue 3 /Overwrite'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA songcsv" Sequence 1 Cue 1 Part 0.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA songcsv" Sequence 1 Cue 2 Part 0.1'), true);
+        assert.equal(commands.some((command) => command.includes("Cue 1 Thru 3 /Merge")), false);
         assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 1 Property "SpeedMaster" #[Master 3.4]'), true);
         assert.equal(commands.includes('Set DataPool "R2MA songcsv" Sequence 2 Property "SpeedMaster" #[Master 3.4]'), true);
+        assert.equal(commands.filter((command) => command.startsWith('Cook DataPool "R2MA songcsv" Sequence ')).length, 3);
         assert.equal(commands.includes('set 1 DURATION="6.000"'), true);
+
+        const cue2Index = commands.indexOf('Store DataPool "R2MA songcsv" Sequence 1 Cue 2 /Overwrite');
+        const cue2RecipeIndex = commands.indexOf('Store Type "StandardRecipe" DataPool "R2MA songcsv" Sequence 1 Cue 2 Part 0.1');
+        assert.equal(cue2Index >= 0 && cue2RecipeIndex === cue2Index + 1, true);
 
         const outputFiles = createConversionOutputFiles(artifacts);
         assert.deepEqual(outputFiles.map((file) => file.name), ["songcsv_macro.xml"]);
@@ -2076,18 +2086,39 @@ R2,Region Two,5,10,5,
             },
         ]);
         assert.equal(commands.filter((command) => command.includes('Property "AllowDuplicates" "Yes"')).length, 1);
-        assert.equal(commands.includes('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1'), true);
-        assert.equal(commands.includes('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1.1'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 /Overwrite'), true);
+        assert.equal(commands.includes('Store DataPool "R2MA cueparts" Sequence 1 Cue 2 /Overwrite'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 0.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA cueparts" Sequence 1 Cue 2 Part 0.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 2.1'), true);
         assert.equal(commands.includes('Label DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 "Dimmer Off"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 Property "CueDelay" "0.5"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 Property "CueFade" "0.2"'), true);
         assert.equal(commands.includes('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1.1 FadeFromX "0.1"'), true);
         assert.equal(commands.some((command) => command.includes('Part 2 Property "CueFade"')), false);
         assert.equal(commands.some((command) => command === 'Set 2 "TIME" "10.5"'), false);
+        assert.equal(
+            commands.some((command) => /^Store DataPool "R2MA cueparts" Sequence 1 Cue \d+ Part /.test(command)),
+            false,
+        );
+        assert.equal(commands.filter((command) => command === 'Cook DataPool "R2MA cueparts" Sequence 1 /Overwrite').length, 1);
 
+        const cueIndex = commands.indexOf('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 /Overwrite');
+        const mainRecipeIndex = commands.indexOf('Store Type "StandardRecipe" DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 0.1');
         const allowIndex = commands.indexOf('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Property "AllowDuplicates" "Yes"');
-        const partIndex = commands.indexOf('Store DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1');
-        assert.equal(allowIndex >= 0 && allowIndex < partIndex, true);
+        const recipeIndex = commands.indexOf('Store Type "StandardRecipe" DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1.1');
+        const propertyIndex = commands.indexOf('Set DataPool "R2MA cueparts" Sequence 1 Cue 1 Part 1 Property "CueDelay" "0.5"');
+        const cookIndex = commands.indexOf('Cook DataPool "R2MA cueparts" Sequence 1 /Overwrite');
+        const timecodeIndex = commands.indexOf('Store DataPool "R2MA cueparts" Timecode 1');
+
+        assert.equal(
+            [cueIndex, mainRecipeIndex, allowIndex, recipeIndex, propertyIndex, cookIndex, timecodeIndex].every((index) => index >= 0),
+            true,
+        );
+        assert.equal(cueIndex < mainRecipeIndex && mainRecipeIndex < allowIndex, true);
+        assert.equal(allowIndex < recipeIndex && recipeIndex < propertyIndex, true);
+        assert.equal(propertyIndex < cookIndex && cookIndex < timecodeIndex, true);
     });
 
     it("routes Cue Parts to region, layer, repeated and bump cues", () => {
@@ -2107,6 +2138,7 @@ R1,Verse,0,10,10,#00BFFF
             ...baseSettings,
             importMode: "regions-and-markers",
         });
+        const commands = getMacroCommands(artifacts.macroXml);
 
         assert.equal(artifacts.regionSequences[0].cues.find((cue) => cue.name === "Region Cue")?.cueParts?.[0].cueDelay, "0.25");
         assert.equal(artifacts.regionLayerSequences[0].cues.find((cue) => cue.name === "Layer Cue")?.cueParts?.[0].cueDelay, "0.4");
@@ -2114,6 +2146,17 @@ R1,Verse,0,10,10,#00BFFF
         assert.equal(artifacts.repeatedSequences[0].cues[0].cueParts?.[0].cueDelay, "0.3");
         assert.equal(artifacts.bumpSequences[0].events.length, 1);
         assert.equal(artifacts.bumpSequences[0].cues[0].cueParts?.[0].cueDelay, "0.15");
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA routedparts" Sequence 1 Cue 2 Part 1.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA routedparts" Sequence 2 Cue 2 Part 1.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA routedparts" Sequence 3 Cue 1 Part 1.1'), true);
+        assert.equal(commands.includes('Store Type "StandardRecipe" DataPool "R2MA routedparts" Sequence 4 Cue 1 Part 1.1'), true);
+        assert.equal(commands.filter((command) => command.startsWith('Cook DataPool "R2MA routedparts" Sequence ')).length, 4);
+        assert.equal(
+            commands
+                .filter((command) => command.startsWith('Store DataPool "R2MA routedparts" Sequence ') && command.includes(" Cue "))
+                .every((command) => command.endsWith("/Overwrite")),
+            true,
+        );
     });
 
     it("warns and ignores orphaned or incompatible Cue Part markers", () => {

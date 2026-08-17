@@ -198,7 +198,8 @@ Bracket tags are parsed from leading or trailing `[]` blocks:
 - Cue timing families are handled by dedicated providers in the registry, so `FadeFromX` can be changed in isolation.
 - `[PART]` markers do not create cues or timecode events. They add sequential Cue Parts to the chronologically previous cue in the same generated sequence; the marker time minus the parent cue time becomes the part `CueDelay`, and optional `CueFade` metadata applies to the part.
 - Cue Part routing supports the main sequence, regions, region layers, repeated color sequences, and `[Temp|PART]` / `[Flash|PART]` bump sequences. Repeated or bump Cue Parts apply every time their reused parent cue is triggered.
-- Generated parent cues receive `AllowDuplicates=Yes` before additional parts are stored. `Part 1` addresses the Cue Part, while `Part 1.1` addresses its first empty recipe line; the existing main recipe line remains `Part 0.1`.
+- Every generated cue is first created explicitly with `Store ... Cue N /Overwrite`, then receives its main recipe with `Store Type "StandardRecipe" ... Part 0.1`. This avoids depending on `Store Cue A Thru B /Merge`, which does not reliably create every empty cue under grandMA3 2.4.2.
+- Generated parent cues receive `AllowDuplicates=Yes` before additional recipes are created directly with `Store Type "StandardRecipe" ... Part N.1`; separate `Store ... Part N` commands are not emitted.
 - Cue Part markers with BPM, bump release, or ON/OFF action metadata are ignored with a validation warning. Orphaned Cue Part markers are also ignored instead of becoming normal cues.
 - Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to cue 1 on the target region track. `OFF` maps to an `Off` event on the target region track without cue assignment. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.
 - Compact region action tags are parsed from marker names as `ON_R2` and `OFF_R1`. `ON` maps to a `Goto|Go+` event assigned to the target region's actual `Region Start` cue. `OFF` maps to an `Off` event on the target region track without cue assignment and suppresses that region's generated auto-off fallback. Tags keep using compact region IDs, but the command generator resolves them to the generated local region sequence. If both are present, `OFF` is emitted before `ON` for the same timestamp.
@@ -275,7 +276,7 @@ All generated files start with:
 <?xml version="1.0" encoding="UTF-8"?>
 ```
 
-The generated root is `GMA3`. CSV conversion output is now always a macro XML wrapper using `DataVersion="1.4.0.2"`. It no longer emits a separate `GMA3.Timecode` object XML file.
+The generated root is `GMA3`. CSV conversion output is now always a macro XML wrapper using `DataVersion="1.4.0.2"`. Its command sequence targets both grandMA3 2.4.1 and 2.4.2. It no longer emits a separate `GMA3.Timecode` object XML file.
 
 The repository also includes standalone macro-library examples in `example/macro/*.xml`. Those files use `DataVersion="2.4.2.2"` and a simpler single-macro structure. Any new standalone macro-library generator should follow that macro-library convention while leaving the CSV conversion XML unchanged.
 
@@ -296,6 +297,7 @@ Macro specifics:
 - BPM tags on markers or region names create a dedicated helper sequence whose cue command uses `Master {speedMaster} At BPM {bpm}`. Region BPM events fire at the region `Start`. This BPM sequence is not assigned to a page executor. Its cues are named from the BPM value, for example `BPM 129.5`, and its timecode events use `Go+` so the cue command executes; a timed `OffCue` handles the 0.5 second release.
 - Main, region, region layer, and repeated sequences are assigned to `Page {pageNumber}.{pageSlotStart + index}` when executor assignment is enabled.
 - Bump overlay sequences are assigned separately to `Page {pageNumber}.{bumpPageSlotStart + index}` when executor assignment is enabled, defaulting to the 100 executor row for button-style Temp/Flash playbacks. Non-global bump markers in regions are region-scoped, named from their region, and placed in that region's timecode track group. Uncolored bump markers in readable colored regions inherit the 42% lightened region color for grouping, sequence/cue appearance, and timeline preview.
+- Every cue is created independently with `/Overwrite` immediately before its explicit `StandardRecipe` at `Part 0.1`. Additional Cue Parts are created directly as typed recipes at `Part N.1`. Each local sequence is finalized with one `Cook DataPool "{temp}" Sequence {local} /Overwrite` after all cue, recipe, appearance, timing, command, and OffCue changes.
 - grandMA3 executor rows are documented as 101-190 for button-only executors, 201-290 for button+fader executors, and 301-490 for button+knob executor rows. Hardware surfaces can expose fewer executor columns than the software range.
 - The macro finalizes with `Move DataPool "{temp}" Sequence 1 Thru At Sequence {firstFinalSequenceNumber}`, optional timecode move, `Set Timecode {timecodeNumber} Property "PlaybackAndRecord" "Manual Events"` so command events execute from cues, and `Delete DataPool "{temp}" /NoConfirm`.
 
